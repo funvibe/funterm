@@ -1,0 +1,57 @@
+# PNG заголовок (8 байт) - сигнатура PNG
+lua.png_signature = <<137:8, 80:8, 78:8, 71:8, 13:8, 10:8, 26:8, 10:8>>
+
+# Проверка PNG сигнатуры
+match lua.png_signature {
+    <<137:8, 80:8, 78:8, 71:8, 13:8, 10:8, 26:8, 10:8>> -> {
+        lua.print("Valid PNG signature")
+    },
+    _ -> {
+        lua.print("Invalid PNG signature")
+    }
+}
+
+# PNG IHDR чанк (правильная структура)
+# Структура: длина(4) + тип(4) + данные(13) + CRC(4)
+lua.ihdr_length = 13
+lua.ihdr_type = "IHDR"
+lua.width = 100
+lua.height = 50
+lua.bit_depth = 8
+lua.color_type = 2  # RGB
+lua.compression = 0
+lua.filter = 0
+lua.interlace = 0
+lua.crc = 0x12345678  # Примерный CRC
+
+lua.png_ihdr = <<
+    lua.ihdr_length:32/big-endian,
+    lua.ihdr_type:4/binary,
+    lua.width:32/big-endian,
+    lua.height:32/big-endian,
+    lua.bit_depth:8,
+    lua.color_type:8,
+    lua.compression:8,
+    lua.filter:8,
+    lua.interlace:8,
+    lua.crc:32/big-endian
+>>
+
+# Разбор PNG чанка
+match lua.png_ihdr {
+    <<length:32/big-endian, "IHDR":4/binary, 
+      width:32/big-endian, height:32/big-endian,
+      bit_depth:8, color_type:8, compression:8, filter:8, interlace:8,
+      crc:32/big-endian>> -> {
+        lua.print("Chunk Length:", length)
+        lua.print("Chunk Type: IHDR")
+        lua.print("Image Width:", width, "pixels")
+        lua.print("Image Height:", height, "pixels")
+        lua.print("Bit Depth:", bit_depth)
+        lua.print("Color Type:", color_type == 2 ? "RGB" : color_type)
+        lua.print("Compression:", compression)
+        lua.print("Filter:", filter)
+        lua.print("Interlace:", interlace)
+        lua.print("CRC:", crc)
+    }
+}

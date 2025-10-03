@@ -1,0 +1,32 @@
+lua.print("\n=== BONUS: IoT Sensor Packet ===")
+
+// Compact IoT sensor reading
+lua.sensor = <<
+    0xAA:8,          // Start marker
+    12:4,            // Device ID (0-15)
+    3:2,             // Sensor type (0=temp, 1=humidity, 2=pressure, 3=light)
+    1:1,             // Battery low flag
+    0:1,             // Error flag
+    2340:12,         // Reading value (scaled)
+    78:7,            // Battery percent
+    1:1,             // More data follows
+    0x55:8           // End marker
+>>
+
+lua.sensor_type = ["Temperature","Humidity","Pressure","Light"]
+
+match lua.sensor {
+    <<0xAA:8, id:4, type:2, bat_low:1, err:1, 
+      value:12, battery:7, more:1, 0x55:8>> -> {
+
+        temp = value/100 ++ "°C"
+        
+        lua.print("📡 IoT Sensor Reading:")
+        lua.print("  Device ID:", id)
+        lua.print("  Sensor:", lua.sensor_type[type])
+        lua.print("  Value:", type == 0 ? temp : value)
+        lua.print("  Battery:", battery, "%", bat_low == 1 ? "⚠️ LOW" : "✓")
+        lua.print("  Status:", err == 1 ? "❌ ERROR" : "✅ OK")
+        lua.print("  Packet size: Just 5 bytes!")
+    }
+}

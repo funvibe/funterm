@@ -1,0 +1,9 @@
+false is false
+0 is false
+empty string is false
+empty array is false
+empty dict is false
+1 is true
+string is true
+array is true
+dict is true

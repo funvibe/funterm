@@ -1,0 +1,7 @@
+js.x = 7
+if (js.x > 5) {
+    js.result = "greater"
+} else {
+    js.result = "smaller"
+}
+js.print(js.result)

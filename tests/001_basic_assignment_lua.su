@@ -1,0 +1,2 @@
+lua.x = "hello from lua"
+lua.print(lua.x)

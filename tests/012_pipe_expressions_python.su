@@ -1,0 +1,5 @@
+py {
+    def to_upper(s):
+        return s.upper()
+}
+py.to_upper("hello pipes") | lua.string.lower()

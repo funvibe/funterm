@@ -1,0 +1,15 @@
+lua (fun) {
+    function fun(s)
+        print(s)
+    end
+}
+
+py.greeting = "hello"
+
+js (up) {
+    function up(s) {
+        return s.toUpperCase();
+    }
+}
+
+lua.fun(js.up(py.greeting))

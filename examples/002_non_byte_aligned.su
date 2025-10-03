@@ -1,0 +1,19 @@
+lua.print("\n=== Non-Byte-Aligned Magic ===")
+
+// Pack 3 values into just 2 bytes!
+// Traditional libraries would need 3 bytes minimum
+lua.packed = <<
+    5:3,    // 3-bit value (0-7)
+    31:5,   // 5-bit value (0-31)  
+    255:8   // 8-bit value (0-255)
+>>
+
+lua.bytes_count = lua.bit_size(lua.packed) / 8
+lua.print("Packed 3 values into", lua.bytes_count, "bytes!")
+
+match lua.packed {
+    <<a:3, b:5, c:8>> -> {
+        lua.print("Unpacked:", a, b, c)
+        lua.print("Space saved: 33%!")
+    }
+}

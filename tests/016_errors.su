@@ -1,0 +1,29 @@
+# Попытка матчинга неправильного размера
+lua.data = <<1, 2, 3>>
+
+match lua.data {
+    <<a:8, b:8, c:8, d:8>> -> lua.print("Should not match - too short"),
+    <<a:8, b:8>> -> lua.print("Should not match - too long"),
+    <<a:8, b:8, c:8>> -> lua.print("Correct match")
+}
+
+# Переполнение при построении
+lua.overflow = <<256:8>>  # 256 не помещается в 8 бит
+match lua.overflow {
+    <<value:8>> -> lua.print("Overflow value:", value)  # Должно быть 0
+}
+
+# Пустой матчинг
+lua.empty = <<>>
+match lua.empty {
+    <<>> -> lua.print("Empty matched"),
+    _ -> lua.print("Empty not matched")
+}
+
+# Несовпадение выравнивания
+lua.unaligned = <<1:7>>  # 7 бит, не выровнено по байту
+
+match lua.unaligned {
+    <<val:7>> -> lua.print("Unaligned 7 bits:", val),
+    _ -> lua.print("Failed to match unaligned")
+}

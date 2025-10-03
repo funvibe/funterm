@@ -1,0 +1,20 @@
+lua.packet = <<5:8, "Hello":5/binary, " World">>
+
+match lua.packet {
+    <<size:8, data:size/binary, rest/binary>> -> {
+        lua.print("Size:", size)
+        lua.print("Data:", data)
+        lua.print("Rest:", rest)
+    }
+}
+
+# Более сложный пример с вычислением размера
+lua.complex = <<10:8, "DATA":4/binary, "EXTRA":5/binary, "END">>
+
+match lua.complex {
+    <<total:8, payload:(total-6)/binary, trailer/binary>> -> {
+        lua.print("Total size:", total)
+        lua.print("Payload:", payload)
+        lua.print("Trailer:", trailer)
+    }
+}

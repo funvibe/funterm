@@ -1,0 +1,4 @@
+Big-endian proof: yes
+Big-endian bytes: 18 52
+Little-endian bytes: 52 18
+Native endian matches: little

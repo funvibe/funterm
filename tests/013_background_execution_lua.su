@@ -1,0 +1,9 @@
+lua (background_task) {
+    function background_task()
+        os.execute("sleep 0.2")
+        print("Background task completed")
+    end
+}
+    
+lua.background_task() &
+lua.print("After background task start")

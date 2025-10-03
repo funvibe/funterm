@@ -1,0 +1,18 @@
+// Test UTF specifiers in bitstring patterns
+lua.data = "Hello"
+
+match lua.data {
+    << h/utf8, e/utf8, l1/utf8, l2/utf8, o/utf8 >> -> {
+        lua.print("Matched UTF-8 codepoints:", h, e, l1, l2, o)
+    },
+    _ -> lua.print("No match")
+}
+
+lua.data_cyrllic = "Привет"
+
+match lua.data_cyrllic {
+    << p/utf8, r/utf8, i/utf8, v/utf8, e/utf8, t/utf8 >> -> {
+        lua.print("Matched cyrillic UTF-8 codepoints:", p, r, i, v, e, t)
+    },
+    _ -> lua.print("No match")
+}

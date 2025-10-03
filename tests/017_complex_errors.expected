@@ -1,0 +1,6 @@
+Min unit result: <<42>>
+Max unit result: <<0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,42>>
+Large size result length: 32 bytes
+Equivalence test 1: PASS
+Zero value: 0
+All boundary tests completed

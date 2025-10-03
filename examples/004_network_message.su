@@ -1,0 +1,32 @@
+lua.print("\n=== Game Dev: Efficient Network Messages ===")
+
+// Pack player state into minimal bytes
+// Position (x,y), health, flags, action
+lua.player_state = <<
+    1024:12,     // X coordinate (0-4095)
+    768:12,      // Y coordinate (0-4095)
+    85:7,        // Health (0-100)
+    1:1,         // Is alive
+    1:1,         // Is moving
+    0:1,         // Is shooting
+    1:1,         // Has powerup
+    3:3,         // Current weapon (0-7)
+    42:8         // Player ID
+>>
+
+lua.bytes_count = lua.bit_size(lua.player_state) / 8
+lua.print("Player state in just", lua.bytes_count, "bytes!")
+
+lua.weapon = ["Pistol","Rifle","Shotgun","Rocket","Laser","Plasma","BFG","Melee"]
+
+match lua.player_state {
+    <<x:12, y:12, health:7, alive:1, moving:1, shooting:1, powerup:1, weapon:3, id:8>> -> {
+        lua.print("Player #", id, " Status:")
+        lua.print("  Position: ", "(", x, ",", y, ")")
+        lua.print("  Health: ", health, "%")
+        lua.print("  Status:", alive == 1 ? "🟢 Alive" : "💀 Dead")
+        lua.print("  Actions:", moving == 1 ? "🏃 Moving" : "🧍 Standing")
+        lua.print("  Powerup:", powerup == 1 ? "⚡ Active" : "")
+        lua.print("  Weapon:", lua.weapon[weapon])
+    }
+}

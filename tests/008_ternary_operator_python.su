@@ -1,0 +1,3 @@
+py.x = 15
+py.result = py.x > 10 ? "greater than 10" : "less than or equal to 10"
+py.print(py.result)

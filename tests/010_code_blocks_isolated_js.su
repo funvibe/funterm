@@ -1,0 +1,5 @@
+js {
+    var x = 42;
+    console.log(x)
+}
+js.console.log(42)

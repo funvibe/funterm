@@ -1,0 +1,5 @@
+py {
+    x = 42
+    print(x)
+}
+py.print(42)

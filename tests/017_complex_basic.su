@@ -1,0 +1,36 @@
+# Тест базовых комбинированных спецификаторов
+# X:4/little-signed-integer-unit:8
+
+lua.value = 42
+lua.result1 = <<lua.value:4/little-signed-integer-unit:8>>
+lua.result2 = <<lua.value:32/little-signed-integer>>  # Эквивалентный синтаксис
+
+lua.print("Complex specifier result:", lua.result1)
+lua.print("Simple specifier result:", lua.result2)
+
+# Проверка эквивалентности
+if (lua.result1 == lua.result2) {
+    lua.print("Results are equivalent: YES")
+} else {
+    lua.print("Results are equivalent: NO")
+}
+
+# Тест с отрицательным числом
+lua.negative = -500
+lua.neg_result = <<lua.negative:1/native-signed-integer-unit:32>>
+
+match lua.neg_result {
+    <<value:32/native-signed-integer>> -> {
+        lua.print("Negative value decoded:", value)
+    }
+}
+
+# Тест с большим числом и unit
+lua.big_value = 1000
+lua.big_result = <<lua.big_value:2/big-unsigned-integer-unit:16>>
+
+match lua.big_result {
+    <<decoded:32/big-unsigned-integer>> -> {
+        lua.print("Big value decoded:", decoded)
+    }
+}

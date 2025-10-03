@@ -1,0 +1,27 @@
+# Тест binary с unit спецификаторами
+# "hello":2/little-binary-unit:16 = 4 байта
+
+lua.text = "hello world"
+lua.binary_result = <<lua.text:2/little-binary-unit:16>>
+
+lua.print("Binary with unit result:", lua.binary_result)
+lua.print("Binary result size:", @lua.binary_result, "bytes")
+
+# Декодирование
+match lua.binary_result {
+    <<a:8, b:8, c:8, d:8>> -> {
+        lua.print("Decoded bytes:", a, b, c, d)
+        lua.print("As chars:", lua.string.char(a), lua.string.char(b), lua.string.char(c), lua.string.char(d))
+    }
+}
+
+# Тест с большим unit
+lua.data = "ABCDEFGH"
+lua.big_unit = <<lua.data:1/binary-unit:64>>  # 1 * 64 = 64 бита = 8 байт
+
+match lua.big_unit {
+    <<first:32, second:32>> -> {
+        lua.print("First 4 bytes as int:", first)
+        lua.print("Second 4 bytes as int:", second)
+    }
+}

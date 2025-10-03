@@ -1,0 +1,34 @@
+# Тест ошибок и граничных случаев
+
+# Корректные граничные случаи
+lua.min_unit = <<42:8/integer-unit:1>>      # Минимальный unit
+lua.max_unit = <<42:1/integer-unit:256>>    # Максимальный unit
+
+lua.print("Min unit result:", lua.min_unit)
+lua.print("Max unit result:", lua.max_unit)
+
+# Тест с большими значениями
+lua.large_size = <<0xFF:4/integer-unit:64>>  # 4 * 64 = 256 бит
+
+lua.print("Large size result length:", @lua.large_size, "bytes")
+
+# Тест эквивалентности разных записей
+lua.test1 = <<100:32/little-signed-integer>>
+lua.test2 = <<100:4/little-signed-integer-unit:8>>
+
+if (lua.test1 == lua.test2) {
+    lua.print("Equivalence test 1: PASS")
+} else {
+    lua.print("Equivalence test 1: FAIL")
+}
+
+# Тест с нулевыми значениями
+lua.zero = <<0:2/big-unsigned-integer-unit:16>>
+
+match lua.zero {
+    <<value:32/big-unsigned-integer>> -> {
+        lua.print("Zero value:", value)
+    }
+}
+
+lua.print("All boundary tests completed")

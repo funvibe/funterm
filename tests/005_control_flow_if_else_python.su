@@ -1,0 +1,7 @@
+py.x = 10
+if (py.x > 5) {
+    py.result = "greater"
+} else {
+    py.result = "smaller"
+}
+py.print(py.result)

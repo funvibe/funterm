@@ -1,0 +1,8 @@
+js (greeting, message) {
+    function greeting(hello) {
+        console.log(hello)
+    }
+    message = "hello again"
+}
+js.greeting("hello from js")
+js.print(js.message)

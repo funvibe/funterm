@@ -1,0 +1,7 @@
+# Python style comment
+py.x = "hello comments" // C++ style inline comment
+/*
+Multi-line comment
+with py.print("ignored")
+*/
+py.print(py.x) -- inline lua comment

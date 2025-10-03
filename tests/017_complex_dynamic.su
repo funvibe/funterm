@@ -1,0 +1,41 @@
+# Динамическое построение с комбинированными спецификаторами
+
+lua.values = [0x12, 0x34, 0x56, 0x78]
+lua.result = <<>>
+
+# Построение с разными endianness
+for i = 0, 3 do
+    value = lua.values[i]
+    if (i % 2 == 0) {
+        # Четные индексы - big-endian
+        lua.result = <<lua.result/binary, value:2/big-unsigned-integer-unit:8>>
+    } else {
+        # Нечетные индексы - little-endian
+        lua.result = <<lua.result/binary, value:2/little-unsigned-integer-unit:8>>
+    }
+end
+
+lua.print("Dynamic result:", lua.result)
+lua.print("Dynamic result size:", @lua.result, "bytes")
+
+# Разбор результата
+match lua.result {
+    <<
+        val1:16/big-unsigned-integer,
+        val2:16/little-unsigned-integer,
+        val3:16/big-unsigned-integer,
+        val4:16/little-unsigned-integer
+    >> -> {
+        lua.print("Value 1 (big):", lua.string.format("0x%04X", val1))
+        lua.print("Value 2 (little):", lua.string.format("0x%04X", val2))
+        lua.print("Value 3 (big):", lua.string.format("0x%04X", val3))
+        lua.print("Value 4 (little):", lua.string.format("0x%04X", val4))
+
+        # Проверка корректности
+        if (val1 == 0x12 && val2 == 0x34 && val3 == 0x56 && val4 == 0x78) {
+            lua.print("Dynamic parsing: SUCCESS")
+        } else {
+            lua.print("Dynamic parsing: FAILED")
+        }
+    }
+}

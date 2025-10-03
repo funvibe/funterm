@@ -1,0 +1,42 @@
+# TCP флаги в битовом формате (правильный порядок TCP флагов)
+# CWR | ECE | URG | ACK | PSH | RST | SYN | FIN
+lua.tcp_flags = <<0:1, 0:1, 0:1, 1:1, 0:1, 0:1, 1:1, 0:1>>  # ACK + SYN
+
+# Правильная структура TCP заголовка (20 байт минимум)
+lua.tcp_header = <<
+    0x1234:16,         # Source port
+    0x5678:16,         # Destination port
+    0x12345678:32,     # Sequence number
+    0x87654321:32,     # Acknowledgment number
+    5:4,               # Data offset (5 * 4 = 20 bytes)
+    0:6,               # Reserved (6 bits)
+    lua.tcp_flags:8/binary,  # Flags (8 bits)
+    0x1000:16,         # Window size
+    0x0000:16,         # Checksum
+    0x0000:16          # Urgent pointer
+>>
+
+match lua.tcp_header {
+    <<src_port:16, dst_port:16, 
+      seq_num:32, ack_num:32,
+      data_offset:4, reserved:6,
+      cwr:1, ece:1, urg:1, ack:1, psh:1, rst:1, syn:1, fin:1,
+      window:16, checksum:16, urgent_ptr:16>> -> {
+        lua.print("TCP Header Analysis:")
+        lua.print("Source Port:", src_port)
+        lua.print("Destination Port:", dst_port)
+        lua.print("Sequence Number:", seq_num)
+        lua.print("Acknowledgment Number:", ack_num)
+        lua.print("Header Length:", data_offset * 4, "bytes")
+        lua.print("Flags:")
+        if (syn == 1) { lua.print("  SYN: Set") }
+        if (ack == 1) { lua.print("  ACK: Set") }
+        if (fin == 1) { lua.print("  FIN: Set") }
+        if (rst == 1) { lua.print("  RST: Set") }
+        if (psh == 1) { lua.print("  PSH: Set") }
+        if (urg == 1) { lua.print("  URG: Set") }
+        lua.print("Window Size:", window)
+        lua.print("Checksum:", checksum)
+        lua.print("Urgent Pointer:", urgent_ptr)
+    }
+}

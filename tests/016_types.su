@@ -1,0 +1,27 @@
+# Integer (по умолчанию)
+lua.integers = <<1:8/integer, 2:16/integer, 3:32/integer>>
+
+# Float
+lua.floats = <<3.14:32/float, 2.718:64/float>>
+
+# Binary
+lua.binary_data = <<"hello">>
+lua.combined = <<lua.binary_data/binary, " world"/binary>>
+
+# Bitstring (не выровнено по байтам)
+lua.bits = <<1:1, 0:1, 1:1, 1:1, 0:4>>
+
+match lua.integers {
+    <<a:8, b:16, c:32>> -> lua.print("Integers:", a, b, c)
+}
+
+match lua.floats {
+    <<a:32/float, b:64/float>> -> {
+        lua.print("Float 32-bit:", a)
+        lua.print("Float 64-bit:", b)
+    }
+}
+
+match lua.combined {
+    <<data:11/binary>> -> lua.print("Combined binary:", data)
+}

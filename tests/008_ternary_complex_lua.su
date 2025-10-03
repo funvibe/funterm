@@ -1,0 +1,19 @@
+lua.a = 5
+lua.b = 5
+lua.c = 10
+
+# Простое равенство
+lua.result1 = lua.a == lua.b ? "equal" : "not equal"
+lua.print("Simple equality:", lua.result1)
+
+# Сложное условие с &&
+lua.result2 = (lua.a == lua.b) && (lua.c > 8) ? "both true" : "not both true"
+lua.print("Complex AND:", lua.result2)
+
+# Сложное условие с ||
+lua.result3 = (lua.a > 10) || (lua.b == 5) ? "at least one true" : "both false"
+lua.print("Complex OR:", lua.result3)
+
+# Вложенные условия
+lua.result4 = (lua.a == lua.b) && ((lua.c > 5) && (lua.c < 15)) ? "nested true" : "nested false"
+lua.print("Nested conditions:", lua.result4)

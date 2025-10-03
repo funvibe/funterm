@@ -1,0 +1,9 @@
+python (background_task) {
+    def background_task():
+        import time
+        time.sleep(0.2)
+        print("Background task completed")
+}
+    
+py.background_task() &
+py.print("After background task start")

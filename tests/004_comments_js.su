@@ -1,0 +1,7 @@
+// C++ style comment
+js.x = "hello comments" -- Lua style inline comment
+/*
+Multi-line comment
+with js.print("ignored")
+*/
+js.print(js.x) # inline python comment

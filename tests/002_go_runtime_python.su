@@ -1,0 +1,2 @@
+lua.x = go.pow(3, 2)
+lua.print(lua.x)

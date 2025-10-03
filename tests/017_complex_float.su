@@ -1,0 +1,27 @@
+# Тест float с комбинированными спецификаторами
+# X:2/big-float-unit:32 = 64-битный float
+
+lua.pi = 3.14159265359
+lua.float_result = <<lua.pi:2/big-float-unit:32>>
+
+lua.print("Float with complex specifier:", lua.float_result)
+
+# Декодирование обратно
+match lua.float_result {
+    <<decoded:64/big-float>> -> {
+        lua.print("Decoded float:", decoded)
+    }
+}
+
+# Тест с little-endian float
+lua.e = 2.71828
+lua.little_float = <<lua.e:2/little-float-unit:32>>
+
+match lua.little_float {
+    <<decoded_e:64/little-float>> -> {
+        lua.print("Little-endian float:", decoded_e)
+    }
+}
+
+# Проверка размера
+lua.print("Float result size:", @lua.float_result, "bytes")

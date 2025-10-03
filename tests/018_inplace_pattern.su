@@ -1,0 +1,21 @@
+// Test inplace bitstring pattern matching
+lua.source = "Hello"
+
+if (<<h/utf8, e/utf8, l1/utf8, l2/utf8, o/utf8>> = lua.source) {
+    lua.print("Inplace pattern matched:", h, e, l1, l2, o)
+}
+
+// Test with qualified variables in pattern
+lua.data = "Hi"
+
+<<lua.first/utf8, lua.second/utf8>> = lua.data
+
+lua.print("Qualified pattern matched:", lua.first, lua.second)
+
+// Test with rest/binary
+lua.message = "Hello World"
+
+<<first/utf8, rest/binary>> = lua.message
+
+lua.print("Rest pattern matched first:", first)
+lua.print("Rest pattern matched rest:", rest)

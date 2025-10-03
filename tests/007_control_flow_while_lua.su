@@ -1,0 +1,7 @@
+lua.i = 1
+lua.total = 0
+while (lua.i <= 3) {
+    lua.total = lua.total + lua.i
+    lua.i = lua.i + 1
+}
+lua.print(lua.total)

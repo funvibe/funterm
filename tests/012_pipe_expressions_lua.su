@@ -1,0 +1,6 @@
+lua {
+    function to_upper(s)
+        return string.upper(s)
+    end
+}
+lua.to_upper("hello pipes") | lua.string.lower()

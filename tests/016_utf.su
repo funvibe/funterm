@@ -1,0 +1,25 @@
+# UTF-8
+lua.utf8_ascii = <<"Hello"/utf8>>
+lua.utf8_unicode = <<"Привет"/utf8>>
+lua.utf8_emoji = <<128640:32/utf8>>
+
+# Pattern matching UTF-8
+match lua.utf8_ascii {
+    <<"Hello"/utf8>> -> lua.print("UTF-8 ASCII matched")
+}
+
+match lua.utf8_unicode {
+    <<"Привет"/utf8>> -> lua.print("Russian UTF-8 matched")
+}
+
+match lua.utf8_emoji {
+    <<char:32/utf8>> -> {
+        lua.print("Emoji codepoint:", char)
+    }
+}
+
+# Построение UTF строк из codepoints
+lua.hello_utf8 = <<72:8/utf8, 101:8/utf8, 108:8/utf8, 108:8/utf8, 111:8/utf8>>
+match lua.hello_utf8 {
+    <<"Hello"/utf8>> -> lua.print("Constructed UTF-8 matches")
+}

@@ -1,0 +1,4 @@
+import js "helpers.js"
+
+js.result = js.imported_function(4, -1)
+js.console.log(js.result)

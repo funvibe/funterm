@@ -1,0 +1,4 @@
+Simple equality: equal
+Complex AND: both true
+Complex OR: at least one true
+Nested conditions: nested true

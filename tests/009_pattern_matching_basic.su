@@ -1,0 +1,18 @@
+for num = 1,3 do
+  match num {
+    0 -> lua.print("zero"),
+    1 -> lua.print("one"),
+    2 -> lua.print("two"),
+    _ -> lua.print("No match")
+  }
+end
+
+lua.data = ["", "one", "two"]
+for i = 0,2 do
+  match lua.data[i] {
+    "zero" -> lua.print("zero"),
+    "one"  -> lua.print("one"),
+    "two"  -> lua.print("two"),
+    _      -> lua.print("No match")
+  }
+end

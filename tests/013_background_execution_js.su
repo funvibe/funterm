@@ -1,0 +1,12 @@
+js (background_task) {
+    function background_task() {
+        const start = Date.now();
+        while (Date.now() - start < 200) {
+            // Busy wait for 200ms
+        }
+        console.log("Background task completed");
+    }
+}
+    
+js.background_task() &
+lua.print("After background task start")

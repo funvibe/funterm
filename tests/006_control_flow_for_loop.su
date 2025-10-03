@@ -1,0 +1,2 @@
+lua.flags = [true, false, true]
+for flag in lua.flags: lua.print(flag ? 1 : 0)

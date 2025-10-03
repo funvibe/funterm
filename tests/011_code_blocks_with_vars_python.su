@@ -1,0 +1,7 @@
+py (greeting, message) {
+    def greeting(hello):
+        print(hello)
+    message = "hello again"
+}
+py.greeting("hello from python")
+py.print(py.message)

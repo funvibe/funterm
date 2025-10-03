@@ -1,0 +1,7 @@
+Mixed packet size: 15 bytes
+Mixed packet: <<222,173,190,239,0,1,112,97,121,108,111,97,100,52,18>>
+Header: 0xDEADBEEF
+Size: 256
+Payload: payload
+Checksum: 0x1234
+Packet parsing: SUCCESS

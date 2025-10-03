@@ -1,0 +1,1 @@
+py.print(lua.string.lower("PYTHON"))

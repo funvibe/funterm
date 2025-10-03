@@ -1,0 +1,36 @@
+lua.print("\n=== Dynamic Protocol Construction ===")
+
+// Build protocol message dynamically
+lua.msg_type = 3  // 1=ping, 2=data, 3=control
+lua.msg_id = 42
+lua.msg_data = "HELLO"
+
+// Construct message based on type
+lua.message = <<lua.msg_type:2>>  // 2-bit type
+
+if (lua.msg_type == 1) {
+    lua.message = <<lua.message/bitstring, lua.msg_id:6>>  // Just ID for ping
+} else if (lua.msg_type == 2) {
+    lua.message = <<lua.message/bitstring, lua.msg_id:6, lua.msg_data/binary>>
+} else {
+    lua.message = <<lua.message/bitstring, lua.msg_id:6, 5:8, lua.msg_data:5/binary>>
+}
+
+lua.msg_type = ["","Ping","Data","Control"]
+
+// Parse the dynamic message
+match lua.message {
+    <<msg_type:2, msg_id:6, rest/binary>> -> {
+        lua.print("📨 Dynamic Message:")
+        lua.print("  Type:", lua.msg_type[msg_type])
+        lua.print("  ID:", msg_id)
+        
+        if (msg_type == 3) {
+            match rest {
+                <<len:8, data:len/binary>> -> {
+                    lua.print("  Control Data:", data)
+                }
+            }
+        }
+    }
+}

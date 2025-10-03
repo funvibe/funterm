@@ -1,0 +1,2 @@
+js.x = "hello from javascript"
+js.print(js.x)

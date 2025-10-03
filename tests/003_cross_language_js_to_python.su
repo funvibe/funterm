@@ -1,0 +1,4 @@
+js (f) {
+    var f = 3.14159.toFixed(2);
+}
+lua.print(js.f)

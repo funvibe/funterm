@@ -1,0 +1,6 @@
+js {
+    function toUpper(s) {
+        return s.toUpperCase();
+    }
+}
+js.toUpper("hello pipes") | lua.string.lower()

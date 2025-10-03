@@ -1,0 +1,2 @@
+lua.x = go.sqrt(144)
+lua.print(lua.x)

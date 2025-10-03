@@ -1,0 +1,19 @@
+lua.array = [[8, "a", 8], ["a", "a", 1], [], [1]]
+for i = 0,3 do
+  match lua.array[i] {
+    []          -> lua.print("empty list"),
+    [_, _, 1]   -> lua.print("1"),
+    [_, "a", _] -> lua.print("a"),
+    _           -> lua.print("No match")
+  }
+end
+
+lua.dict = [{"city": "Moscow"}, {"region": 77}, {}, {"age": 878}]
+for i = 0,3 do
+  match lua.dict[i] {
+    {}             -> lua.print("empty dict"),
+    {"city": city} -> lua.print(city),
+    {_: 77}        -> lua.print("region"),
+    _              -> lua.print("No match")
+  }
+end

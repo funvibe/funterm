@@ -1,0 +1,5 @@
+lua {
+    x = 42
+    print(x)
+}
+lua.print(42)

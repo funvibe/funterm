@@ -1,0 +1,71 @@
+# Вложенные битовые строки
+lua.inner = <<42:8, "Hello":5/binary>>
+lua.outer = <<1:8, lua.inner, 2:8, "World":5/binary>>
+
+match lua.outer {
+    <<header:8, inner_data:6/binary, footer:8, tail/binary>> -> {
+        lua.print("Header:", header)
+        lua.print("Inner Data:", inner_data)
+        lua.print("Footer:", footer)
+        lua.print("Tail:", tail)
+        
+        # Распаковка вложенных данных
+        match inner_data {
+            <<value:8, text:5/binary>> -> {
+                lua.print("Nested Value:", value)
+                lua.print("Nested Text:", text)
+            }
+        }
+    }
+}
+
+# Более сложный пример с несколькими уровнями вложенности
+lua.level1 = <<10:8, "L1":2/binary>>
+lua.level2 = <<20:8, lua.level1, "L2":2/binary>>
+lua.level3 = <<30:8, lua.level2, "L3":2/binary>>
+
+match lua.level3 {
+    <<l3_header:8, l3_inner:6/binary, l3_tail/binary>> -> {
+        lua.print("Level 3 Header:", l3_header)
+        lua.print("Level 3 Tail:", l3_tail)
+        
+        match l3_inner {
+            <<l2_header:8, l2_inner:3/binary, l2_tail/binary>> -> {
+                lua.print("Level 2 Header:", l2_header)
+                lua.print("Level 2 Tail:", l2_tail)
+                
+                match l2_inner {
+                    <<l1_header:8, l1_data/binary>> -> {
+                        lua.print("Level 1 Header:", l1_header)
+                        lua.print("Level 1 Data:", l1_data)
+                    }
+                }
+            }
+        }
+    }
+}
+
+# Вложенные строки с переменным размером
+lua.packet = <<5:8, <<1:1, 0:1, 1:1, 0:1, 1:1, 0:1, 0:1, 1:1>>, "Data":4/binary>>
+
+match lua.packet {
+    <<size:8, flags:8/bits, data/binary>> -> {
+        lua.print("Size:", size)
+        lua.print("Flags:", flags)
+        lua.print("Data:", data)
+        
+        # Распаковка флагов
+        match flags {
+            <<f1:1, f2:1, f3:1, f4:1, f5:1, f6:1, f7:1, f8:1>> -> {
+                lua.print("Flag 1:", f1)
+                lua.print("Flag 2:", f2)
+                lua.print("Flag 3:", f3)
+                lua.print("Flag 4:", f4)
+                lua.print("Flag 5:", f5)
+                lua.print("Flag 6:", f6)
+                lua.print("Flag 7:", f7)
+                lua.print("Flag 8:", f8)
+            }
+        }
+    }
+}

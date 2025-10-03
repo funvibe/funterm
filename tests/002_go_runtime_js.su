@@ -1,0 +1,2 @@
+js.x = go.cos(0)
+js.print(js.x)

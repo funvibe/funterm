@@ -1,0 +1,7 @@
+lua.x = 3
+if (lua.x > 5) {
+    lua.result = "greater"
+} else {
+    lua.result = "smaller"
+}
+lua.print(lua.result)

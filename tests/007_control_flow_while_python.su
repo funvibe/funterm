@@ -1,0 +1,7 @@
+py.i = 1
+py.total = 0
+while (py.i <= 3) {
+    py.total = py.total + py.i
+    py.i = py.i + 1
+}
+py.print(py.total)

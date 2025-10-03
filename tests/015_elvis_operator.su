@@ -1,0 +1,35 @@
+// TODO: python
+// py (get_none) {
+//     def get_none():
+//         return None
+// }
+
+lua.false = false ?: "false is false"
+// js.nil = lua.get_none() ?: "nil is false"
+lua.zero = 0 ?: "0 is false"
+lua.empty_string = "" ?: "empty string is false"
+js.empty_array = [] ?: "empty array is false"
+lua.empty_dict = {} ?: "empty dict is false"
+lua.one = 1 ?: "1 is false"
+js.str = "hi" ?: "string is false"
+lua.array = [1] ?: "array is false"
+lua.dict = {"a":1} ?: "dict is false"
+
+lua.print(lua.false)
+// lua.print(js.nil)
+lua.print(lua.zero)
+lua.print(lua.empty_string)
+lua.print(js.empty_array)
+lua.print(lua.empty_dict)
+if (lua.one == 1) {
+    lua.print("1 is true")
+}
+if (js.str == "hi") {
+    lua.print("string is true")
+}
+if (lua.array[0] == 1) {
+    lua.print("array is true")
+}
+if (lua.dict["a"] == 1) {
+    lua.print("dict is true")
+}

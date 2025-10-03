@@ -1,0 +1,40 @@
+# Создаем IPv4 заголовок
+lua.version = 4
+lua.header_length = 5
+lua.service_type = 0
+lua.total_length = 20
+lua.identification = 12345
+lua.flags = 2
+lua.fragment_offset = 0
+lua.ttl = 64
+lua.protocol = 6  # TCP
+lua.checksum = 0
+lua.src_ip = 0xC0A80001  # 192.168.0.1
+lua.dst_ip = 0x08080808  # 8.8.8.8
+
+lua.ip_header = <<
+    lua.version:4, lua.header_length:4,
+    lua.service_type:8,
+    lua.total_length:16,
+    lua.identification:16,
+    lua.flags:3, lua.fragment_offset:13,
+    lua.ttl:8, lua.protocol:8,
+    lua.checksum:16,
+    lua.src_ip:32,
+    lua.dst_ip:32
+>>
+
+match lua.ip_header {
+    <<4:4, hlen:4, svc:8, total:16,
+      id:16, flags:3, frag:13,
+      ttl:8, proto:8, csum:16,
+      src:32/big-endian, dst:32/big-endian>> -> {
+        lua.print("IP Version: 4")
+        lua.print("Header Length:", hlen * 4, "bytes")
+        lua.print("Total Length:", total)
+        lua.print("Protocol:", proto == 6 ? "TCP" : proto == 17 ? "UDP" : "Other")
+        lua.print("Source IP:", (src >> 24) & 0xFF, ".", (src >> 16) & 0xFF, ".", (src >> 8) & 0xFF, ".", src & 0xFF)
+        lua.print("Dest IP:", (dst >> 24) & 0xFF, ".", (dst >> 16) & 0xFF, ".", (dst >> 8) & 0xFF, ".", dst & 0xFF)
+    },
+    _ -> lua.print("Not an IPv4 packet")
+}

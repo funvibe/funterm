@@ -1,0 +1,31 @@
+lua.print("\n=== Real-World: TCP/IP Packet Parser ===")
+
+// Actual TCP SYN packet structure
+lua.tcp_syn = <<
+    // TCP Header
+    443:16,                    // Source port (HTTPS)
+    80:16,                     // Dest port (HTTP)
+    0x12345678:32,            // Sequence number
+    0:32,                      // ACK number (0 for SYN)
+    5:4, 0:6,                  // Header length + reserved
+    0:1,0:1,0:1,0:1,0:1,0:1,1:1,0:1,  // Flags: SYN set
+    8192:16,                   // Window size
+    0:16,                      // Checksum
+    0:16,                      // Urgent pointer
+    "GET / HTTP/1.1\r\n"       // Payload
+>>
+
+match lua.tcp_syn {
+    <<src:16, dst:16, seq:32, ack:32,
+      hlen:4, reserved:6, flags1:2, syn:1, flags2:5,
+      window:16, check_point:32, payload/binary>> -> {
+        
+        lua.print("🔍 Parsed TCP Packet:")
+        lua.print("  Source Port:", src == 443 ? "HTTPS" : src)
+        lua.print("  Dest Port:", dst == 80 ? "HTTP" : dst)
+        lua.print("  Sequence:", lua.string.format("0x%08X", seq))
+        lua.print("  SYN Flag:", syn == 1 ? "✓ Connection Request" : "✗")
+        lua.print("  Window:", window, "bytes")
+        lua.print("  Payload:", payload)
+    }
+}

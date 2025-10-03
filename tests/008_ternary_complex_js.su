@@ -1,0 +1,19 @@
+js.a = 5
+js.b = 5
+js.c = 10
+
+# Простое равенство
+js.result1 = js.a == js.b ? "equal" : "not equal"
+js.print("Simple equality:", js.result1)
+
+# Сложное условие с &&
+js.result2 = (js.a == js.b) && (js.c > 8) ? "both true" : "not both true"
+js.print("Complex AND:", js.result2)
+
+# Сложное условие с ||
+js.result3 = (js.a > 10) || (js.b == 5) ? "at least one true" : "both false"
+js.print("Complex OR:", js.result3)
+
+# Вложенные условия
+js.result4 = (js.a == js.b) && ((js.c > 5) && (js.c < 15)) ? "nested true" : "nested false"
+js.print("Nested conditions:", js.result4)

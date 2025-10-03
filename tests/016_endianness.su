@@ -1,0 +1,25 @@
+lua.value = 0x1234
+
+# Big-endian (по умолчанию)
+lua.big = <<lua.value:16>>
+lua.big_explicit = <<lua.value:16/big-endian>>
+lua.big_both = <<lua.big, lua.big_explicit>>
+
+# Little-endian
+lua.little = <<lua.value:16/little-endian>>
+
+match lua.big_both {
+    <<high_d:8, low_d:8, high_e:8, low_e:8>> -> lua.print("Big-endian proof:", (high_d == high_e) && (low_d == low_e) ? "yes" : "no")
+}
+
+match lua.big {
+    <<high:8, low:8>> -> lua.print("Big-endian bytes:", high, low)
+}
+
+match lua.little {
+    <<low:8, high:8>> -> lua.print("Little-endian bytes:", low, high)
+}
+
+# Native endian (зависит от системы)
+lua.native = <<lua.value:16/native>>
+lua.print("Native endian matches:", (lua.native == lua.big) ? "big" : "little")

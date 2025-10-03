@@ -1,0 +1,39 @@
+# Тест смешанных комбинированных спецификаторов в одном выражении
+
+lua.header = 0xDEADBEEF
+lua.size = 256
+lua.data = "payload"
+lua.checksum = 0x1234
+
+# Создание пакета с разными спецификаторами
+lua.packet = <<
+    lua.header:1/big-unsigned-integer-unit:32,     # 32-битный заголовок
+    lua.size:2/little-unsigned-integer-unit:8,    # 16-битный размер little-endian
+    lua.data:7/binary-unit:8,                     # 7 байт данных
+    lua.checksum:1/little-unsigned-integer-unit:16 # 16-битная контрольная сумма
+>>
+
+lua.print("Mixed packet size:", @lua.packet, "bytes")
+lua.print("Mixed packet:", lua.packet)
+
+# Разбор пакета
+match lua.packet {
+    <<
+        header:32/big-unsigned-integer,
+        size:16/little-unsigned-integer,
+        payload:7/binary,
+        checksum:16/little-unsigned-integer
+    >> -> {
+        lua.print("Header:", lua.string.format("0x%08X", header))
+        lua.print("Size:", size)
+        lua.print("Payload:", payload)
+        lua.print("Checksum:", lua.string.format("0x%04X", checksum))
+    }
+}
+
+# Проверка корректности
+if (lua.header == 0xDEADBEEF && lua.size == 256) {
+    lua.print("Packet parsing: SUCCESS")
+} else {
+    lua.print("Packet parsing: FAILED")
+}

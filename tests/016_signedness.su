@@ -1,0 +1,21 @@
+lua.data = <<255:8, 127:8, 128:8>>
+
+match lua.data {
+    <<a:8/unsigned, b:8/unsigned, c:8/unsigned>> -> {
+        lua.print("Unsigned:", a, b, c)
+    }
+}
+
+match lua.data {
+    <<a:8/signed, b:8/signed, c:8/signed>> -> {
+        lua.print("Signed:", a, b, c)
+    }
+}
+
+# Отрицательные числа
+lua.negative = <<-1:8/signed, -128:8/signed, 127:8/signed>>
+match lua.negative {
+    <<a:8/signed, b:8/signed, c:8/signed>> -> {
+        lua.print("Negative signed:", a, b, c)
+    }
+}

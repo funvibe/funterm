@@ -1,0 +1,9 @@
+# Test Float 16 support
+lua.float16_data = <<3.14:16/float, 2.5:16/float>>
+
+match lua.float16_data {
+    <<a:16/float, b:16/float>> -> {
+        lua.print("Float 16-bit a:", a)
+        lua.print("Float 16-bit b:", b)
+    }
+}

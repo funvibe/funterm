@@ -1,0 +1,7 @@
+js.i = 1
+js.total = 0
+while (js.i <= 3) {
+    js.total = js.total + js.i
+    js.i = js.i + 1
+}
+js.console.log(js.total)

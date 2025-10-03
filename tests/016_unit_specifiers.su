@@ -1,0 +1,27 @@
+# unit:1 (по умолчанию для integer)
+lua.unit1 = <<15:4/integer-unit:1>>
+
+# unit:8 (по умолчанию для binary)
+lua.data = <<"test">>
+lua.unit8 = <<lua.data:4/binary-unit:8>>  # 4 * 8 = 32 бита = 4 байта
+
+# unit:16 для выравнивания
+lua.aligned = <<0:0, "AB":2/binary-unit:16>>  # 2 * 16 = 32 бита
+
+match lua.unit1 {
+    <<value:4>> -> lua.print("4 bits value:", value)
+}
+
+match lua.unit8 {
+    <<data:32/bitstring>> -> lua.print("32 bits extracted")
+}
+
+# Unit specifier с разными типами
+lua.mixed_units = <<42:2/unit:8, 3.14:2/unit:32>>  # 16 бит для integer, 64 бит для float
+
+match lua.mixed_units {
+    <<int_val:16, float_val:64/float>> -> {
+        lua.print("Integer with unit:", int_val)
+        lua.print("Float with unit:", float_val)
+    }
+}

@@ -1,0 +1,48 @@
+# Бинарные файлы
+funterm
+funterm-*
+*.exe
+
+# Архивы релизов
+release-assets/
+bin/
+
+# Go
+*.log
+go.sum
+
+# Конфигурационные файлы
+*.conf
+*.key
+*.pem
+config/*.yaml
+!config/example.yaml
+
+# Виртуальные окружения
+venv/
+env/
+.env*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Временные файлы
+*.tmp
+*.temp
+tmp/
+temp/
+
+# Логи
+logs/
+*.log
+
+# Базы данных
+*.db
+*.sqlite*

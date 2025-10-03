@@ -1,0 +1,12 @@
+lua.disk_usage = go.exec("df -h / | awk 'NR==2{print $5}'")
+
+match lua.disk_usage {
+    << percent:8, "%", rest/binary >> -> {
+        if (percent > 80) {
+            lua.print("WARNING: disk usage ", percent, "%")
+        } else {
+            lua.print("DISK USAGE: OK")
+        }
+    },
+    _ -> lua.print("Failed to parse disk usage")
+}

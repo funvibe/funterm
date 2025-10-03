@@ -1,0 +1,3 @@
+lua.x = 5
+lua.result = lua.x > 10 ? "greater than 10" : "less than or equal to 10"
+lua.print(lua.result)

@@ -1,0 +1,2 @@
+py.x = "hello from python"
+py.print(py.x)

@@ -1,0 +1,4 @@
+py (simple_var) {
+    simple_var = "test"
+}
+py.print(py.simple_var)

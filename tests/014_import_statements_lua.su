@@ -1,0 +1,4 @@
+import lua "helpers.lua"
+
+lua.result = lua.imported_function(-4, 11)
+lua.print(lua.result)

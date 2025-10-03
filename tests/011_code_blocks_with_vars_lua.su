@@ -1,0 +1,8 @@
+lua (greeting, message) {
+    function greeting(hello)
+        print(hello)
+    end
+    message = "hello again"
+}
+lua.greeting("hello from lua")
+lua.print(lua.message)

@@ -1,0 +1,7 @@
+Dynamic result: <<0,18,52,0,0,86,120,0>>
+Dynamic result size: 8 bytes
+Value 1 (big): 0x0012
+Value 2 (little): 0x0034
+Value 3 (big): 0x0056
+Value 4 (little): 0x0078
+Dynamic parsing: SUCCESS

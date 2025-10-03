@@ -1,0 +1,9 @@
+lua.empty = <<>>
+lua.single_byte = <<42>>
+lua.three_bytes = <<1, 2, 3>>
+lua.from_string = <<"hello">>
+
+lua.print("Empty length:", lua.len(lua.empty))
+lua.print("Single byte:", lua.single_byte[0])
+lua.print("Three bytes:", lua.three_bytes[0], lua.three_bytes[1], lua.three_bytes[2])
+lua.print("String as bytes:", lua.from_string[0], lua.from_string[1])

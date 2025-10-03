@@ -1,0 +1,12 @@
+TCP Header Analysis:
+Source Port: 4660
+Destination Port: 22136
+Sequence Number: 305419896
+Acknowledgment Number: 2271560481
+Header Length: 20 bytes
+Flags:
+  SYN: Set
+  ACK: Set
+Window Size: 4096
+Checksum: 0
+Urgent Pointer: 0

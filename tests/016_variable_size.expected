@@ -1,0 +1,6 @@
+Size: 5
+Data: Hello
+Rest:  World
+Total size: 10
+Payload: DATA
+Trailer: EXTRAEND
