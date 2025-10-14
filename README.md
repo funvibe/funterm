@@ -1,24 +1,22 @@
-# 🚀 funterm: Multi-Language REPL & Binary Data Processor
+# funterm: Multi-Language REPL & Binary Data Processor
 
-**Seamlessly blend Python, Lua, JavaScript, and Go with advanced bitstring pattern matching, cross-language pipes, and sophisticated data processing capabilities.**
+funterm is a multi-language REPL and scripting environment that integrates Python, Lua, JavaScript, and Go. It provides Erlang-style bitstring operations, pattern matching, cross-language pipes, and data processing capabilities.
 
-funterm integrates Python's ecosystem, Lua's speed, JavaScript's versatility, and Go's performance into a unified scripting environment with Erlang-style bitstring operations and pattern matching.
+## Features
 
-## ✨ Key Features
+- **Multi-Language Support**: Python, Lua, JavaScript (Node.js), Go
+- **Bitstring Pattern Matching**: Erlang-style binary parsing with `<< >>` syntax
+- **Inplace Pattern Matching**: Direct variable extraction with `<<pattern>> = value`
+- **Cross-Language Pipes**: Chain functions between languages with `|`
+- **Background Execution**: Non-blocking tasks with `&` operator
+- **Advanced Pattern Matching**: Destructure data with guards and wildcards
+- **String Concatenation**: `++` operator with automatic type conversion
+- **Controlled Variable Persistence**: Explicit state management with `runtime (vars) { ... }`
 
-- 🛠️ **Multi-Language Support**: Python, Lua, JavaScript (Node.js), Go
-- 🔥 **Bitstring Pattern Matching**: Erlang-style binary parsing with `<< >>` syntax
-- ⚡ **Inplace Pattern Matching**: Direct variable extraction with `<<pattern>> = value`
-- 🔄 **Cross-Language Pipes**: Chain functions between languages with `|`
-- ⚡ **Background Execution**: Non-blocking tasks with `&` operator
-- 🎯 **Advanced Pattern Matching**: Destructure data with guards and wildcards
-- 🔧 **String Concatenation**: `++` operator with automatic type conversion
-- 📦 **Controlled Variable Persistence**: Explicit state management with `runtime (vars) { ... }`
-
-## 🏃‍♂️ Quick Start
+## Quick Start
 
 ### Download Pre-built Binaries
-Download the latest release for your platform from [GitHub Releases](../../releases):
+Download the release for your platform from [GitHub Releases](../../releases):
 - **Linux**: `funterm-linux-amd64.tar.gz` or `funterm-linux-arm64.tar.gz`
 - **macOS**: `funterm-darwin-amd64.tar.gz` or `funterm-darwin-arm64.tar.gz`
 - **Windows**: `funterm-windows-amd64.zip` or `funterm-windows-arm64.zip`
@@ -38,9 +36,9 @@ go build -o funterm main.go config.go batch.go
 ./funterm -exec script.su
 ```
 
-## 🎯 Real-World Examples
+## Examples
 
-### 🔥 Bitstring Pattern Matching
+### Bitstring Pattern Matching
 ```erlang
 # Binary protocol parsing
 lua.packet = <<0xDEADBEEF:32, 256:16/little, "payload"/binary, 0x1234:16>>
@@ -60,7 +58,7 @@ match lua.utf8_data {
 }
 ```
 
-### ⚡ Inplace Pattern Matching
+### Inplace Pattern Matching
 ```erlang
 # Direct pattern assignment (Erlang-style)
 lua.source = "Hello"
@@ -81,7 +79,7 @@ lua.packet = <<0xAA:8, 12:4, 0x55:8>>
 lua.print("Header:", header, "ID:", id, "Footer:", footer)
 ```
 
-### 🔄 Cross-Language Pipes
+### Cross-Language Pipes
 ```python
 # Multi-language data processing pipeline
 py (process_data) {
@@ -107,7 +105,7 @@ lua.result = js.up(py.greeting)
 lua.print(lua.result)  # Output: HELLO WORLD
 ```
 
-### 🔧 String Concatenation
+### String Concatenation
 ```python
 # String concatenation with automatic type conversion
 py.name = "Alice"
@@ -128,7 +126,7 @@ lua.formatted = py.value ++ " points"
 lua.print(lua.formatted)  # Output: "42 points"
 ```
 
-### ⚡ Background Execution
+### Background Execution
 ```python
 # Non-blocking tasks
 py (background_task) {
@@ -142,7 +140,7 @@ py.background_task() &  # Runs in background
 py.print("This executes immediately")
 ```
 
-### 📦 Controlled Variable Persistence
+### Controlled Variable Persistence
 ```python
 # Variables are isolated by default
 py {
@@ -165,9 +163,9 @@ lua.print(py.greeting("World"))  # Output: Hello, World!
 lua.print(py.calculate(5, 3))    # Output: 25
 ```
 
-## 🛠️ Language Runtimes
+## Language Runtimes
 
-### Python Runtime - Full Ecosystem
+### Python Runtime
 ```python
 py (fetch_data) {
     import requests, json
@@ -178,7 +176,7 @@ py (fetch_data) {
 }
 ```
 
-### Lua Runtime - High Performance
+### Lua Runtime
 ```lua
 lua (fast_filter) {
     function fast_filter(arr, predicate)
@@ -193,7 +191,7 @@ lua (fast_filter) {
 }
 ```
 
-### JavaScript Runtime - Node.js Ecosystem
+### JavaScript Runtime
 ```javascript
 js (processFiles) {
     const fs = require('fs');
@@ -206,16 +204,16 @@ js (processFiles) {
 }
 ```
 
-### Go Runtime - System Operations
+### Go Runtime
 ```go
-# High-performance utilities (stateless)
+# Stateless utilities
 lua.result = go.md5("hello world")      # Cryptography
 lua.timestamp = go.timestamp()          # Time functions
 lua.encoded = go.base64_encode("data")  # Encoding
 lua.files = go.list_dir("/tmp")         # File operations
 ```
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 funterm/
@@ -238,11 +236,11 @@ funterm/
     └── 018_*.su              # Inplace pattern matching tests
 ```
 
-## ⚙️ Configuration
+## Configuration
 
-### Default Behavior (No Config Required)
+### Default Behavior
 ```bash
-# Works out-of-the-box with smart defaults
+# Operates with default settings
 ./funterm
 ```
 
@@ -260,22 +258,17 @@ languages:
       path: "/usr/local/bin/python3.11"  # Custom Python path
 ```
 
-## 📚 Examples
+## Examples
 
-Check out the `examples/` directory for real-world use cases:
+The `examples/` directory contains use cases:
 - `001_welcome.su` - Basic multi-language usage
 - `006_bitcoin.su` - Bitcoin transaction parsing
 - `008_iot.su` - IoT protocol handling
 
 The `tests/` directory contains comprehensive test scenarios that demonstrate all features.
 
-## 🤝 Contributing
+## Contributing
 
-Open-source project welcoming contributions for new features, optimizations, and documentation.
+Contributions for new features, optimizations, and documentation are accepted.
 
 **License**: MIT
-
----
-
-**Ready to orchestrate multiple languages with advanced binary processing?** 🚀  
-`./funterm`
