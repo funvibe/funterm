@@ -2,8 +2,9 @@ package handler
 
 import (
 	"fmt"
+	"math/big"
 	"strconv"
-
+	"strings"
 	"go-parser/pkg/ast"
 	"go-parser/pkg/common"
 	"go-parser/pkg/config"
@@ -63,14 +64,14 @@ func (h *BitstringHandler) Handle(ctx *common.ParseContext) (interface{}, error)
 			} else if tokenStream.Current().Type == lexer.TokenDoubleRightAngle {
 				break
 			} else {
-				return nil, fmt.Errorf("expected ',' or '>>' after segment, got %s", tokenStream.Current().Type)
+				return nil, newErrorWithTokenPos(tokenStream.Current(), "expected ',' or '>>' after segment, got %s", tokenStream.Current().Type)
 			}
 		}
 	}
 
 	// 3. Потребляем >>
 	if !tokenStream.HasMore() || tokenStream.Current().Type != lexer.TokenDoubleRightAngle {
-		return nil, fmt.Errorf("expected '>>' to close bitstring")
+		return nil, newErrorWithPos(tokenStream, "expected '>>' to close bitstring")
 	}
 	rightAngle := tokenStream.Consume()
 	bitstring.RightAngle = rightAngle
@@ -89,14 +90,14 @@ func (h *BitstringHandler) parseSegment(tokenStream stream.TokenStream) (*ast.Bi
 
 	// 2. Парсим Value
 	if !tokenStream.HasMore() {
-		return nil, fmt.Errorf("unexpected EOF in segment")
+		return nil, newErrorWithPos(tokenStream, "unexpected EOF in segment")
 	}
 
 	valueToken := tokenStream.Consume()
 	var err error
 	segment.Value, err = h.parseExpression(tokenStream, valueToken)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse segment value: %v", err)
+		return nil, newErrorWithPos(tokenStream, "failed to parse segment value: %v", err)
 	}
 
 	// 2. Пропускаем NEWLINE токены после значения
@@ -109,7 +110,7 @@ func (h *BitstringHandler) parseSegment(tokenStream stream.TokenStream) (*ast.Bi
 		segment.ColonToken = tokenStream.Consume() // потребляем ':'
 
 		if !tokenStream.HasMore() {
-			return nil, fmt.Errorf("unexpected EOF after colon in segment")
+			return nil, newErrorWithPos(tokenStream, "unexpected EOF after colon in segment")
 		}
 
 		// Пропускаем NEWLINE токены после двоеточия
@@ -122,12 +123,16 @@ func (h *BitstringHandler) parseSegment(tokenStream stream.TokenStream) (*ast.Bi
 
 		if nextToken.Type == lexer.TokenNumber || nextToken.Type == lexer.TokenIdentifier || nextToken.Type == lexer.TokenLeftParen || nextToken.IsLanguageToken() {
 			// Это размер (:Size, :Variable или :(Expression))
-			sizeToken := tokenStream.Consume()
-
-			// Парсим выражение размера
-			sizeExpr, err := h.parseExpression(tokenStream, sizeToken)
+			// Собираем токены для размера выражения
+			sizeTokens, err := h.collectSizeTokens(tokenStream)
 			if err != nil {
-				return nil, fmt.Errorf("failed to parse segment size: %v", err)
+				return nil, newErrorWithPos(tokenStream, "failed to collect size tokens: %v", err)
+			}
+
+			// Парсим выражение размера с помощью shunting-yard
+			sizeExpr, err := h.parseExpressionWithShuntingYard(sizeTokens)
+			if err != nil {
+				return nil, newErrorWithPos(tokenStream, "failed to parse segment size: %v", err)
 			}
 
 			// Определяем, является ли размер динамическим
@@ -136,7 +141,7 @@ func (h *BitstringHandler) parseSegment(tokenStream stream.TokenStream) (*ast.Bi
 			if isDynamic {
 				// Создаем SizeExpression для динамического размера
 				sizeExpression := ast.NewSizeExpression()
-				sizeExpression.Pos = tokenToPosition(sizeToken)
+				sizeExpression.Pos = tokenToPosition(sizeTokens[0])
 
 				if nextToken.Type == lexer.TokenIdentifier || nextToken.IsLanguageToken() {
 					// Простая ссылка на переменную или квалифицированная переменная
@@ -148,11 +153,16 @@ func (h *BitstringHandler) parseSegment(tokenStream stream.TokenStream) (*ast.Bi
 						// Сложное выражение (включая квалифицированные идентификаторы)
 						sizeExpression.ExprType = "expression"
 						sizeExpression.Expression = sizeExpr
+						// Для совместимости с funbit устанавливаем Variable как строковое представление без внешних скобок
+						// Но сохраняем Expression для обратной совместимости
+						sizeExpression.Variable = h.expressionToString(sizeExpr)
 					}
 				} else if nextToken.Type == lexer.TokenLeftParen {
 					// Выражение в скобках
 					sizeExpression.ExprType = "expression"
 					sizeExpression.Expression = sizeExpr
+					// Для совместимости с funbit устанавливаем Variable как строковое представление без внешних скобок
+					sizeExpression.Variable = h.expressionToString(sizeExpr)
 				} else {
 					// Литеральное значение (число) - может быть использовано в выражениях
 					sizeExpression.ExprType = "literal"
@@ -185,13 +195,13 @@ func (h *BitstringHandler) parseSegment(tokenStream stream.TokenStream) (*ast.Bi
 
 				// Проверяем, что после идентификатора нет слэша (иначе это была бы ошибка)
 				if tokenStream.HasMore() && tokenStream.Current().Type == lexer.TokenSlash {
-					return nil, fmt.Errorf("invalid specifier format - use :size/specifier or :specifier, not :identifier/slash")
+					return nil, newErrorWithPos(tokenStream, "invalid specifier format - use :size/specifier or :specifier, not :identifier/slash")
 				}
 
 				// Это спецификатор типа (:Specifiers)
 				segment.Specifiers = append(segment.Specifiers, specToken.Value)
 			} else {
-				return nil, fmt.Errorf("expected number, identifier, or '(' after colon, got %s", nextToken.Type)
+				return nil, newErrorWithTokenPos(nextToken, "expected number, identifier, or '(' after colon, got %s", nextToken.Type)
 			}
 		}
 	}
@@ -226,13 +236,13 @@ func (h *BitstringHandler) parseSpecifiers(tokenStream stream.TokenStream, segme
 			tokenStream.Consume() // потребляем ':'
 
 			if !tokenStream.HasMore() {
-				return fmt.Errorf("unexpected EOF after colon in specifier")
+				return newErrorWithPos(tokenStream, "unexpected EOF after colon in specifier")
 			}
 
 			// Парсим значение параметра спецификатора
 			paramToken := tokenStream.Consume()
 			if paramToken.Type != lexer.TokenNumber && paramToken.Type != lexer.TokenIdentifier {
-				return fmt.Errorf("expected number or identifier as specifier parameter, got %s", paramToken.Type)
+				return newErrorWithTokenPos(paramToken, "expected number or identifier as specifier parameter, got %s", paramToken.Type)
 			}
 
 			// Комбинируем спецификатор и его параметр
@@ -246,7 +256,7 @@ func (h *BitstringHandler) parseSpecifiers(tokenStream stream.TokenStream, segme
 			tokenStream.Consume() // потребляем '-'
 
 			if !tokenStream.HasMore() || tokenStream.Current().Type != lexer.TokenIdentifier {
-				return fmt.Errorf("expected specifier after hyphen")
+				return newErrorWithPos(tokenStream, "expected specifier after hyphen")
 			}
 
 			specToken = tokenStream.Consume()
@@ -257,13 +267,13 @@ func (h *BitstringHandler) parseSpecifiers(tokenStream stream.TokenStream, segme
 				tokenStream.Consume() // потребляем ':'
 
 				if !tokenStream.HasMore() {
-					return fmt.Errorf("unexpected EOF after colon in specifier")
+					return newErrorWithPos(tokenStream, "unexpected EOF after colon in specifier")
 				}
 
 				// Парсим значение параметра спецификатора
 				paramToken := tokenStream.Consume()
 				if paramToken.Type != lexer.TokenNumber && paramToken.Type != lexer.TokenIdentifier {
-					return fmt.Errorf("expected number or identifier as specifier parameter, got %s", paramToken.Type)
+					return newErrorWithTokenPos(paramToken, "expected number or identifier as specifier parameter, got %s", paramToken.Type)
 				}
 
 				// Комбинируем спецификатор и его параметр
@@ -290,21 +300,24 @@ func (h *BitstringHandler) parseExpression(tokenStream stream.TokenStream, token
 			},
 		}, nil
 	case lexer.TokenNumber:
-		numValue, err := strconv.ParseFloat(token.Value, 64)
+		numValue, err := parseNumber(token.Value)
 		if err != nil {
-			return nil, fmt.Errorf("invalid number format: %s", token.Value)
+			return nil, newErrorWithTokenPos(token, "invalid number format: %s", token.Value)
 		}
-		return &ast.NumberLiteral{
-			Value: numValue,
+		return createNumberLiteral(token, numValue), nil
+	case lexer.TokenIdentifier:
+		// Проверяем, не является ли это квалифицированной переменной или вызовом функции
+		return h.parseComplexIdentifier(tokenStream, token)
+	case lexer.TokenUnderscore:
+		// Special case for wildcard pattern '_'
+		return &ast.Identifier{
+			Name: token.Value,
 			Pos: ast.Position{
 				Line:   token.Line,
 				Column: token.Column,
 				Offset: token.Position,
 			},
 		}, nil
-	case lexer.TokenIdentifier:
-		// Проверяем, не является ли это квалифицированной переменной или вызовом функции
-		return h.parseComplexIdentifier(tokenStream, token)
 	case lexer.TokenLeftParen:
 		// Обработка выражений в скобках - используем BinaryExpressionHandler
 		return h.parseParenthesizedExpression(tokenStream, token)
@@ -313,14 +326,14 @@ func (h *BitstringHandler) parseExpression(tokenStream stream.TokenStream, token
 		if len(token.Value) > 0 && token.Value[0] == '#' {
 			// Это комментарий, пропускаем его и пробуем получить следующий токен
 			if !tokenStream.HasMore() {
-				return nil, fmt.Errorf("unexpected EOF after comment")
+				return nil, newErrorWithPos(tokenStream, "unexpected EOF after comment")
 			}
 			nextToken := tokenStream.Consume()
 			return h.parseExpression(tokenStream, nextToken)
 		}
 		// Обычный NEWLINE, пропускаем и пробуем получить следующий токен
 		if !tokenStream.HasMore() {
-			return nil, fmt.Errorf("unexpected EOF after newline")
+			return nil, newErrorWithPos(tokenStream, "unexpected EOF after newline")
 		}
 		nextToken := tokenStream.Consume()
 		return h.parseExpression(tokenStream, nextToken)
@@ -330,7 +343,7 @@ func (h *BitstringHandler) parseExpression(tokenStream stream.TokenStream, token
 			// Это языковой токен - обрабатываем как квалифицированную переменную
 			return h.parseQualifiedIdentifierOrFunctionCall(tokenStream, token)
 		}
-		return nil, fmt.Errorf("unsupported expression type: %s", token.Type)
+		return nil, newErrorWithTokenPos(token, "unsupported expression type: %s", token.Type)
 	}
 }
 
@@ -358,18 +371,18 @@ func (h *BitstringHandler) parseParenthesizedExpression(tokenStream stream.Token
 	// Сначала парсим первый операнд внутри скобок
 	leftOperand, err := binaryHandler.parseOperand(tempCtx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse first operand in parentheses: %v", err)
+		return nil, newErrorWithPos(tokenStream, "failed to parse first operand in parentheses: %v", err)
 	}
 
 	// Затем парсим полное выражение, начиная с первого операнда
 	expr, err := binaryHandler.ParseFullExpression(tempCtx, leftOperand)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse expression in parentheses: %v", err)
+		return nil, newErrorWithPos(tokenStream, "failed to parse expression in parentheses: %v", err)
 	}
 
 	// Проверяем и потребляем закрывающую скобку
 	if !tokenStream.HasMore() || tokenStream.Current().Type != lexer.TokenRightParen {
-		return nil, fmt.Errorf("expected ')' after expression")
+		return nil, newErrorWithPos(tokenStream, "expected ')' after expression")
 	}
 	tokenStream.Consume() // потребляем ')'
 
@@ -397,18 +410,18 @@ func (h *BitstringHandler) parseQualifiedIdentifierOrFunctionCall(tokenStream st
 	languageRegistry := CreateDefaultLanguageRegistry()
 	resolvedLanguage, err := languageRegistry.ResolveAlias(language)
 	if err != nil {
-		return nil, fmt.Errorf("unsupported language '%s': %v", language, err)
+		return nil, newErrorWithTokenPos(languageToken, "unsupported language '%s': %v", language, err)
 	}
 
 	// Потребляем DOT
 	if !tokenStream.HasMore() || tokenStream.Current().Type != lexer.TokenDot {
-		return nil, fmt.Errorf("expected DOT after language '%s'", language)
+		return nil, newErrorWithPos(tokenStream, "expected DOT after language '%s'", language)
 	}
 	tokenStream.Consume() // Consuming DOT
 
 	// Читаем следующий идентификатор
 	if !tokenStream.HasMore() || tokenStream.Current().Type != lexer.TokenIdentifier {
-		return nil, fmt.Errorf("expected identifier after DOT")
+		return nil, newErrorWithPos(tokenStream, "expected identifier after DOT")
 	}
 	nextToken := tokenStream.Consume()
 
@@ -431,7 +444,7 @@ func (h *BitstringHandler) parseQualifiedIdentifierOrFunctionCall(tokenStream st
 func (h *BitstringHandler) parseFunctionCall(tokenStream stream.TokenStream, languageToken lexer.Token, functionToken lexer.Token, resolvedLanguage string) (ast.Expression, error) {
 	// Потребляем открывающую скобку
 	if !tokenStream.HasMore() || tokenStream.Current().Type != lexer.TokenLeftParen {
-		return nil, fmt.Errorf("expected '(' after function name")
+		return nil, newErrorWithPos(tokenStream, "expected '(' after function name")
 	}
 	tokenStream.Consume()
 
@@ -443,7 +456,7 @@ func (h *BitstringHandler) parseFunctionCall(tokenStream stream.TokenStream, lan
 		tokenStream.Consume() // Consuming dot
 
 		if !tokenStream.HasMore() || tokenStream.Current().Type != lexer.TokenIdentifier {
-			return nil, fmt.Errorf("expected function name after dot")
+			return nil, newErrorWithPos(tokenStream, "expected function name after dot")
 		}
 		functionToken = tokenStream.Consume()
 		functionParts = append(functionParts, functionToken.Value)
@@ -465,20 +478,20 @@ func (h *BitstringHandler) parseFunctionCall(tokenStream stream.TokenStream, lan
 		// Есть аргументы
 		for {
 			if !tokenStream.HasMore() {
-				return nil, fmt.Errorf("unexpected EOF in function arguments")
+				return nil, newErrorWithPos(tokenStream, "unexpected EOF in function arguments")
 			}
 
 			// Читаем аргумент
 			argToken := tokenStream.Consume()
 			arg, err := h.parseExpression(tokenStream, argToken)
 			if err != nil {
-				return nil, fmt.Errorf("failed to parse function argument: %v", err)
+				return nil, newErrorWithPos(tokenStream, "failed to parse function argument: %v", err)
 			}
 			arguments = append(arguments, arg)
 
 			// Проверяем разделитель
 			if !tokenStream.HasMore() {
-				return nil, fmt.Errorf("unexpected EOF after function argument")
+				return nil, newErrorWithPos(tokenStream, "unexpected EOF after function argument")
 			}
 
 			if tokenStream.Current().Type == lexer.TokenComma {
@@ -486,14 +499,14 @@ func (h *BitstringHandler) parseFunctionCall(tokenStream stream.TokenStream, lan
 			} else if tokenStream.Current().Type == lexer.TokenRightParen {
 				break
 			} else {
-				return nil, fmt.Errorf("expected ',' or ')' in function arguments, got %s", tokenStream.Current().Type)
+				return nil, newErrorWithTokenPos(tokenStream.Current(), "expected ',' or ')' in function arguments, got %s", tokenStream.Current().Type)
 			}
 		}
 	}
 
 	// Потребляем закрывающую скобку
 	if !tokenStream.HasMore() || tokenStream.Current().Type != lexer.TokenRightParen {
-		return nil, fmt.Errorf("expected ')' to close function call")
+		return nil, newErrorWithPos(tokenStream, "expected ')' to close function call")
 	}
 	tokenStream.Consume()
 
@@ -521,7 +534,7 @@ func (h *BitstringHandler) parseQualifiedVariableWithPath(tokenStream stream.Tok
 
 		// Читаем следующую часть пути
 		if !tokenStream.HasMore() || tokenStream.Current().Type != lexer.TokenIdentifier {
-			return nil, fmt.Errorf("expected identifier after DOT")
+			return nil, newErrorWithPos(tokenStream, "expected identifier after DOT")
 		}
 		partToken := tokenStream.Consume()
 		pathParts = append(pathParts, partToken.Value)
@@ -534,7 +547,7 @@ func (h *BitstringHandler) parseQualifiedVariableWithPath(tokenStream stream.Tok
 
 	// Последняя часть пути - это имя переменной
 	if len(pathParts) == 0 {
-		return nil, fmt.Errorf("empty path in qualified variable")
+		return nil, newErrorWithPos(tokenStream, "empty path in qualified variable")
 	}
 
 	variableName := pathParts[len(pathParts)-1]
@@ -589,6 +602,284 @@ func (h *BitstringHandler) isDynamicSizeExpression(expr ast.Expression) bool {
 		// Другие типы выражений считаем динамическими для безопасности
 		return true
 	}
+}
+
+// parseExpressionWithShuntingYard парсит выражение используя алгоритм shunting-yard
+func (h *BitstringHandler) parseExpressionWithShuntingYard(tokens []lexer.Token) (ast.Expression, error) {
+	if len(tokens) == 0 {
+		return nil, nil
+	}
+
+	// Стеки для алгоритма shunting-yard
+	var outputQueue []ast.Expression
+	var operatorStack []lexer.Token
+
+	i := 0
+	for i < len(tokens) {
+		token := tokens[i]
+
+		switch token.Type {
+		case lexer.TokenNumber:
+			// Числа идут в output queue
+			expr, err := h.createNumberLiteral(token)
+			if err != nil {
+				return nil, err
+			}
+			outputQueue = append(outputQueue, expr)
+			i++
+
+		case lexer.TokenIdentifier:
+			// Идентификаторы идут в output queue
+			expr := h.createIdentifier(token)
+			outputQueue = append(outputQueue, expr)
+			i++
+
+		case lexer.TokenLeftParen:
+			// Для битстрингов обрабатываем скобки как часть выражения
+			// Просто добавляем оператор в стек без создания NestedExpression
+			operatorStack = append(operatorStack, token)
+			i++
+
+		case lexer.TokenRightParen:
+			// Обрабатываем закрывающую скобку
+			for len(operatorStack) > 0 {
+				topOp := operatorStack[len(operatorStack)-1]
+				operatorStack = operatorStack[:len(operatorStack)-1]
+
+				if topOp.Type == lexer.TokenLeftParen {
+					break
+				}
+
+				binaryExpr, err := h.createBinaryExpressionFromStack(topOp, &outputQueue)
+				if err != nil {
+					return nil, err
+				}
+				outputQueue = append(outputQueue, binaryExpr)
+			}
+			i++
+
+		default:
+			// Проверяем, является ли токен оператором
+			if info, isOp := h.getOperatorInfo(token.Type); isOp {
+				// Обрабатываем операторы в стеке
+				for len(operatorStack) > 0 {
+					topOp := operatorStack[len(operatorStack)-1]
+					topInfo, topIsOp := h.getOperatorInfo(topOp.Type)
+
+					if !topIsOp {
+						break
+					}
+
+					// Если оператор на вершине стека имеет более высокий приоритет
+					// или такой же приоритет и лево-ассоциативный
+					if (info.associative && info.precedence <= topInfo.precedence) ||
+						(!info.associative && info.precedence < topInfo.precedence) {
+
+						// Перемещаем оператор в output queue
+						binaryExpr, err := h.createBinaryExpressionFromStack(topOp, &outputQueue)
+						if err != nil {
+							return nil, err
+						}
+						outputQueue = append(outputQueue, binaryExpr)
+						operatorStack = operatorStack[:len(operatorStack)-1]
+					} else {
+						break
+					}
+				}
+
+				// Добавляем текущий оператор в стек
+				operatorStack = append(operatorStack, token)
+				i++
+			} else {
+				// Неизвестный токен
+				return nil, fmt.Errorf("неизвестный токен в выражении: %s в строке %d, колонка %d",
+					token.Value, token.Line, token.Column)
+			}
+		}
+	}
+
+	// Перемещаем оставшиеся операторы в output queue
+	for len(operatorStack) > 0 {
+		op := operatorStack[len(operatorStack)-1]
+		operatorStack = operatorStack[:len(operatorStack)-1]
+
+		if op.Type == lexer.TokenLeftParen {
+			return nil, fmt.Errorf("несбалансированная скобка: отсутствует ')' в строке %d, колонка %d",
+				op.Line, op.Column)
+		}
+
+		binaryExpr, err := h.createBinaryExpressionFromStack(op, &outputQueue)
+		if err != nil {
+			return nil, err
+		}
+		outputQueue = append(outputQueue, binaryExpr)
+	}
+
+	// Возвращаем единственное выражение из output queue
+	if len(outputQueue) != 1 {
+		return nil, fmt.Errorf("ошибка парсинга: ожидалось одно выражение, получено %d", len(outputQueue))
+	}
+
+	return outputQueue[0], nil
+}
+
+// BitstringOperatorInfo содержит информацию об операторе
+type BitstringOperatorInfo struct {
+	precedence  int
+	associative bool // true для left-associative, false для right-associative
+}
+
+// getOperatorInfo возвращает информацию об операторе
+func (h *BitstringHandler) getOperatorInfo(tokenType lexer.TokenType) (BitstringOperatorInfo, bool) {
+	operatorPrecedence := map[lexer.TokenType]BitstringOperatorInfo{
+		lexer.TokenOr:           {precedence: 1, associative: true},
+		lexer.TokenAnd:          {precedence: 2, associative: true},
+		lexer.TokenEqual:        {precedence: 3, associative: true},
+		lexer.TokenNotEqual:     {precedence: 3, associative: true},
+		lexer.TokenLess:         {precedence: 4, associative: true},
+		lexer.TokenGreater:      {precedence: 4, associative: true},
+		lexer.TokenLessEqual:    {precedence: 4, associative: true},
+		lexer.TokenGreaterEqual: {precedence: 4, associative: true},
+		lexer.TokenPlus:         {precedence: 5, associative: true},
+		lexer.TokenMinus:        {precedence: 5, associative: true},
+		lexer.TokenMultiply:     {precedence: 6, associative: true},
+		lexer.TokenSlash:        {precedence: 6, associative: true},
+		lexer.TokenModulo:       {precedence: 6, associative: true},
+		lexer.TokenPower:        {precedence: 7, associative: false}, // right-associative
+		lexer.TokenAssign:       {precedence: 0, associative: true}, // assignment has lowest precedence
+	}
+
+	info, exists := operatorPrecedence[tokenType]
+	return info, exists
+}
+
+
+// createNumberLiteral создает числовой литерал
+func (h *BitstringHandler) createNumberLiteral(token lexer.Token) (ast.Expression, error) {
+	pos := ast.Position{
+		Line:   token.Line,
+		Column: token.Column,
+		Offset: token.Position,
+	}
+
+	// Пытаемся парсить как integer, потом как float
+	if intVal, err := strconv.ParseInt(token.Value, 10, 64); err == nil {
+		return &ast.NumberLiteral{
+			IntValue: big.NewInt(intVal),
+			IsInt:    true,
+			Pos:      pos,
+		}, nil
+	}
+
+	if floatVal, err := strconv.ParseFloat(token.Value, 64); err == nil {
+		return &ast.NumberLiteral{
+			FloatValue: floatVal,
+			IsInt:      false,
+			Pos:        pos,
+		}, nil
+	}
+
+	return nil, fmt.Errorf("неверный числовой литерал: %s", token.Value)
+}
+
+// createIdentifier создает идентификатор
+func (h *BitstringHandler) createIdentifier(token lexer.Token) ast.Expression {
+	return &ast.Identifier{
+		Name: token.Value,
+		Pos: ast.Position{
+			Line:   token.Line,
+			Column: token.Column,
+			Offset: token.Position,
+		},
+	}
+}
+
+// createBinaryExpressionFromStack создает бинарное выражение из оператора и стека
+func (h *BitstringHandler) createBinaryExpressionFromStack(op lexer.Token, outputQueue *[]ast.Expression) (ast.Expression, error) {
+	if len(*outputQueue) < 2 {
+		return nil, fmt.Errorf("insufficient operands for operator %s", op.Value)
+	}
+
+	// Извлекаем правый и левый операнды
+	right := (*outputQueue)[len(*outputQueue)-1]
+	left := (*outputQueue)[len(*outputQueue)-2]
+
+	// Удаляем операнды из очереди
+	*outputQueue = (*outputQueue)[:len(*outputQueue)-2]
+
+	// Создаем бинарное выражение
+	pos := ast.Position{
+		Line:   op.Line,
+		Column: op.Column,
+		Offset: op.Position,
+	}
+
+	return &ast.BinaryExpression{
+		Left:     left,
+		Operator: op.Value,
+		Right:    right,
+		BaseNode: ast.BaseNode{},
+		Pos:      pos,
+	}, nil
+}
+
+// expressionToString конвертирует выражение в строку для funbit
+func (h *BitstringHandler) expressionToString(expr ast.Expression) string {
+	if str, ok := expr.(interface{ String() string }); ok {
+		exprStr := str.String()
+		// Убираем внешние скобки для funbit
+		if strings.HasPrefix(exprStr, "(") && strings.HasSuffix(exprStr, ")") {
+			exprStr = exprStr[1 : len(exprStr)-1]
+		}
+		return exprStr
+	}
+	return ""
+}
+
+// collectSizeTokens собирает токены для выражения размера до разделителей
+func (h *BitstringHandler) collectSizeTokens(tokenStream stream.TokenStream) ([]lexer.Token, error) {
+	var tokens []lexer.Token
+	depth := 0
+
+	for tokenStream.HasMore() {
+		token := tokenStream.Current()
+
+		// Проверяем на разделители, которые заканчивают выражение размера
+		if depth == 0 && (token.Type == lexer.TokenComma || token.Type == lexer.TokenSlash || token.Type == lexer.TokenDoubleRightAngle) {
+			break
+		}
+
+		// Отслеживаем вложенность скобок
+		if token.Type == lexer.TokenLeftParen {
+			depth++
+		} else if token.Type == lexer.TokenRightParen {
+			depth--
+			if depth < 0 {
+				return nil, newErrorWithTokenPos(token, "unexpected ')' in size expression")
+			}
+		}
+
+		tokens = append(tokens, token)
+		tokenStream.Consume()
+
+		// Если глубина стала 0 и следующий токен - разделитель, останавливаемся
+		if depth == 0 && tokenStream.HasMore() {
+			nextToken := tokenStream.Current()
+			if nextToken.Type == lexer.TokenComma || nextToken.Type == lexer.TokenSlash || nextToken.Type == lexer.TokenDoubleRightAngle {
+				break
+			}
+		}
+	}
+
+	if depth > 0 {
+		return nil, newErrorWithPos(tokenStream, "unclosed parentheses in size expression")
+	}
+
+	if len(tokens) == 0 {
+		return nil, newErrorWithPos(tokenStream, "empty size expression")
+	}
+
+	return tokens, nil
 }
 
 // isBitstringConcatenation проверяет, является ли битовая строка конкатенацией

@@ -1,0 +1,7 @@
+huge = 999999999999999999999999999999999999
+data = <<1:8>>
+match data {
+    <<result:(huge * 2)/binary>> -> {
+        lua.print("Should not reach here")
+    }
+}

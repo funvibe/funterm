@@ -114,7 +114,6 @@ func (p *RecursiveParser) ParseTokens(stream stream.TokenStream) (*ParseResult, 
 		for _, constructType := range []common.ConstructType{
 			common.ConstructLiteral,
 			common.ConstructVariable,
-			common.ConstructTuple,
 			common.ConstructFunction,
 			common.ConstructGroup,
 		} {
@@ -200,7 +199,6 @@ func (p *RecursiveParser) ParseTokens(stream stream.TokenStream) (*ParseResult, 
 				for _, constructType := range []common.ConstructType{
 					common.ConstructLiteral,
 					common.ConstructVariable,
-					common.ConstructTuple,
 					common.ConstructFunction,
 					common.ConstructGroup,
 				} {

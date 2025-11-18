@@ -1,0 +1,7 @@
+zero = 0
+data = <<1:8>>
+match data {
+    <<result:(10/zero)/binary>> -> {
+        lua.print("Should not reach here")
+    }
+}

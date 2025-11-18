@@ -10,9 +10,10 @@ import (
 // VariableAssignment - узел для присваивания переменной
 type VariableAssignment struct {
 	BaseNode
-	Variable *Identifier
-	Assign   lexer.Token
-	Value    Expression
+	Variable  *Identifier
+	Assign    lexer.Token
+	Value     Expression
+	IsMutable bool
 }
 
 // Position возвращает позицию узла в коде (реализация интерфейса Statement)
@@ -23,9 +24,10 @@ func (n *VariableAssignment) Position() Position {
 // NewVariableAssignment создает новый узел присваивания переменной
 func NewVariableAssignment(variable *Identifier, assign lexer.Token, value Expression) *VariableAssignment {
 	return &VariableAssignment{
-		Variable: variable,
-		Assign:   assign,
-		Value:    value,
+		Variable:  variable,
+		Assign:    assign,
+		Value:     value,
+		IsMutable: true, // Все переменные теперь mutable - только '='
 	}
 }
 
@@ -39,7 +41,7 @@ func (n *VariableAssignment) String() string {
 	var builder strings.Builder
 	builder.WriteString("VariableAssignment(")
 	builder.WriteString(n.Variable.String())
-	builder.WriteString(" = ")
+	builder.WriteString(" = ") // Всегда '=' - больше нет ':='
 	if valueNode, ok := n.Value.(Node); ok {
 		builder.WriteString(valueNode.String())
 	} else {
@@ -246,6 +248,14 @@ type BitstringPatternAssignment struct {
 	Value   Expression           // Значение справа от =
 }
 
+// BitstringPatternMatchExpression - выражение для bitstring pattern matching, возвращающее boolean
+type BitstringPatternMatchExpression struct {
+	BaseNode
+	Pattern *BitstringExpression // Bitstring pattern слева от =
+	Assign  lexer.Token          // Токен присваивания
+	Value   Expression           // Значение справа от =
+}
+
 // Position возвращает позицию узла в коде
 func (bpa *BitstringPatternAssignment) Position() Position {
 	return bpa.Pattern.Position()
@@ -285,6 +295,43 @@ func (bpa *BitstringPatternAssignment) statementMarker() {}
 
 // expressionMarker реализует интерфейс Expression
 func (bpa *BitstringPatternAssignment) expressionMarker() {}
+
+// Position возвращает позицию узла в коде
+func (bpme *BitstringPatternMatchExpression) Position() Position {
+	return bpme.Pattern.Position()
+}
+
+// Type возвращает тип узла
+func (bpme *BitstringPatternMatchExpression) Type() NodeType {
+	return NodeInvalid // Используем NodeInvalid т.к. нет отдельного типа
+}
+
+// String возвращает строковое представление
+func (bpme *BitstringPatternMatchExpression) String() string {
+	return fmt.Sprintf("BitstringPatternMatchExpression(%s = %s)", bpme.Pattern.String(), bpme.Value)
+}
+
+// ToMap преобразует узел в map для сериализации
+func (bpme *BitstringPatternMatchExpression) ToMap() map[string]interface{} {
+	return map[string]interface{}{
+		"type":     "BitstringPatternMatchExpression",
+		"pattern":  bpme.Pattern.ToMap(),
+		"value":    bpme.Value.ToMap(),
+		"position": bpme.Pattern.Position().ToMap(),
+	}
+}
+
+// NewBitstringPatternMatchExpression создает новое выражение bitstring pattern matching
+func NewBitstringPatternMatchExpression(pattern *BitstringExpression, assign lexer.Token, value Expression) *BitstringPatternMatchExpression {
+	return &BitstringPatternMatchExpression{
+		Pattern: pattern,
+		Assign:  assign,
+		Value:   value,
+	}
+}
+
+// expressionMarker реализует интерфейс Expression
+func (bpme *BitstringPatternMatchExpression) expressionMarker() {}
 
 // Type возвращает тип узла
 func (id *Identifier) Type() NodeType {

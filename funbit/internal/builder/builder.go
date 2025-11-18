@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"math/big"
 	"reflect"
 	"unicode/utf8"
 
@@ -118,7 +119,11 @@ func (b *Builder) AddInteger(value interface{}, options ...bitstring.SegmentOpti
 	// Auto-detect signedness if not explicitly set
 	if !segment.Signed {
 		// Check if value is negative
-		if val := reflect.ValueOf(value); val.Kind() >= reflect.Int && val.Kind() <= reflect.Int64 {
+		if bigInt, ok := value.(*big.Int); ok {
+			if bigInt != nil && bigInt.Sign() < 0 {
+				segment.Signed = true
+			}
+		} else if val := reflect.ValueOf(value); val.Kind() >= reflect.Int && val.Kind() <= reflect.Int64 {
 			if val.Int() < 0 {
 				segment.Signed = true
 			}
@@ -364,6 +369,17 @@ func encodeSegment(w *bitWriter, segment *bitstring.Segment) error {
 }
 
 func toUint64(v interface{}) (uint64, error) {
+	// Handle *big.Int first
+	if bigInt, ok := v.(*big.Int); ok {
+		if bigInt == nil {
+			return 0, fmt.Errorf("big.Int value is nil")
+		}
+		if !bigInt.IsUint64() {
+			return 0, fmt.Errorf("big.Int value %s is too large to fit in uint64", bigInt.String())
+		}
+		return bigInt.Uint64(), nil
+	}
+
 	// Using reflect to handle different integer types
 	val := reflect.ValueOf(v)
 	switch val.Kind() {
@@ -407,9 +423,64 @@ func encodeInteger(w *bitWriter, segment *bitstring.Segment) error {
 		return nil // No bits to write
 	}
 
-	value, err := toUint64(segment.Value)
-	if err != nil {
-		return err
+	// Handle big.Int values specially for signed encoding
+	var value uint64
+	var err error
+
+	if bigInt, ok := segment.Value.(*big.Int); ok && bigInt != nil && bigInt.Sign() < 0 {
+		if segment.Signed {
+			// For signed negative big.Int, we need special handling
+			// For very large negative numbers, we should clamp to -1 (all bits set)
+			// For values within range, use normal two's complement
+			minVal := new(big.Int).Lsh(big.NewInt(1), effectiveSize-1)
+			minVal.Neg(minVal) // -2^(effectiveSize-1)
+
+			// Clamp the value to the signed range
+			clampedValue := new(big.Int)
+			if bigInt.Cmp(minVal) < 0 {
+				// For very large negative numbers, clamp to -1 (all bits set to 1)
+				clampedValue.SetInt64(-1)
+			} else {
+				clampedValue.Set(bigInt)
+			}
+
+			// Now apply two's complement
+			modulus := new(big.Int).Lsh(big.NewInt(1), effectiveSize)
+			twosComplement := new(big.Int).Mod(clampedValue, modulus)
+
+			if twosComplement.IsUint64() {
+				value = twosComplement.Uint64()
+			} else {
+				// If still too large, take least significant bits
+				value = twosComplement.Uint64()
+			}
+		} else {
+			// For unsigned negative big.Int, use two's complement representation
+			// For very large negative numbers, clamp to -1 (all bits set to 1)
+			modulus := new(big.Int).Lsh(big.NewInt(1), effectiveSize)
+			twosComplement := new(big.Int).Mod(bigInt, modulus)
+
+			if twosComplement.IsUint64() {
+				value = twosComplement.Uint64()
+			} else {
+				// If still too large, take least significant bits
+				value = twosComplement.Uint64()
+			}
+		}
+	} else if bigInt, ok := segment.Value.(*big.Int); ok && bigInt != nil {
+		// Convert positive big.Int to uint64
+		if bigInt.IsUint64() {
+			value = bigInt.Uint64()
+		} else {
+			// If too large, take least significant bits (Erlang behavior)
+			value = bigInt.Uint64()
+		}
+	} else {
+		// For all other cases, use toUint64
+		value, err = toUint64(segment.Value)
+		if err != nil {
+			return err
+		}
 	}
 
 	// According to Erlang bit syntax specification:
@@ -424,7 +495,11 @@ func encodeInteger(w *bitWriter, segment *bitstring.Segment) error {
 	if effectiveSize < 64 {
 		// For unsigned segments, check for negative values
 		if !segment.Signed {
-			if val := reflect.ValueOf(segment.Value); val.Kind() >= reflect.Int && val.Kind() <= reflect.Int64 {
+			if bigInt, ok := segment.Value.(*big.Int); ok {
+				if bigInt != nil && bigInt.Sign() < 0 {
+					return bitstring.NewBitStringError(bitstring.CodeOverflow, "unsigned overflow")
+				}
+			} else if val := reflect.ValueOf(segment.Value); val.Kind() >= reflect.Int && val.Kind() <= reflect.Int64 {
 				intValue := val.Int()
 				if intValue < 0 {
 					return bitstring.NewBitStringError(bitstring.CodeOverflow, "unsigned overflow")
@@ -439,7 +514,11 @@ func encodeInteger(w *bitWriter, segment *bitstring.Segment) error {
 		// For sizes >= 64 bits, we can't do overflow checking with uint64
 		// Just check for negative values when encoding as unsigned
 		if !segment.Signed {
-			if val := reflect.ValueOf(segment.Value); val.Kind() >= reflect.Int && val.Kind() <= reflect.Int64 {
+			if bigInt, ok := segment.Value.(*big.Int); ok {
+				if bigInt != nil && bigInt.Sign() < 0 {
+					return bitstring.NewBitStringError(bitstring.CodeOverflow, "unsigned overflow")
+				}
+			} else if val := reflect.ValueOf(segment.Value); val.Kind() >= reflect.Int && val.Kind() <= reflect.Int64 {
 				intValue := val.Int()
 				if intValue < 0 {
 					return bitstring.NewBitStringError(bitstring.CodeOverflow, "unsigned overflow")
@@ -475,7 +554,28 @@ func encodeInteger(w *bitWriter, segment *bitstring.Segment) error {
 		if segment.Signed {
 			// For signed integers, we need to handle two's complement properly
 			// Convert negative values to their two's complement representation
-			if val := reflect.ValueOf(segment.Value); val.Kind() >= reflect.Int && val.Kind() <= reflect.Int64 {
+			if bigInt, ok := segment.Value.(*big.Int); ok {
+				if bigInt != nil && bigInt.Sign() < 0 {
+					// Convert negative big.Int to two's complement
+					mask := new(big.Int).Lsh(big.NewInt(1), effectiveSize)
+					mask.Sub(mask, big.NewInt(1))
+					negativeValue := new(big.Int).And(bigInt, mask)
+
+					// For any size, take the least significant bits (Erlang behavior)
+					// This ensures proper two's complement representation
+					tempValue := new(big.Int).Mod(negativeValue, new(big.Int).Lsh(big.NewInt(1), effectiveSize))
+					if tempValue.IsUint64() {
+						value = tempValue.Uint64()
+					} else {
+						// If the result is still too large, take the least significant bits
+						value = tempValue.Uint64() // This will truncate, but that's the Erlang behavior
+					}
+				} else {
+					// Positive values just get truncated
+					mask := (uint64(1) << effectiveSize) - 1
+					value &= mask
+				}
+			} else if val := reflect.ValueOf(segment.Value); val.Kind() >= reflect.Int && val.Kind() <= reflect.Int64 {
 				intValue := val.Int()
 				if intValue < 0 {
 					// Convert negative to two's complement

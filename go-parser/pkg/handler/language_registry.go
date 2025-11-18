@@ -293,6 +293,7 @@ func CreateDefaultLanguageRegistry() LanguageRegistry {
 	// Регистрируем стандартные алиасы
 	registry.RegisterAlias("py", "python")
 	registry.RegisterAlias("js", "node")
+	registry.RegisterAlias("l", "lua")
 
 	return registry
 }

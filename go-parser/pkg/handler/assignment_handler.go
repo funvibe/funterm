@@ -2,6 +2,7 @@ package handler
 
 import (
 	"fmt"
+	"math/big"
 
 	"go-parser/pkg/ast"
 	"go-parser/pkg/common"
@@ -35,13 +36,22 @@ func NewAssignmentHandlerWithVerbose(priority, order int, verbose bool) *Assignm
 // CanHandle проверяет, может ли обработчик обработать токен
 func (h *AssignmentHandler) CanHandle(token lexer.Token) bool {
 	// Поддерживаем обычные идентификаторы и языковые токены (PY, LUA, GO, JS, etc.)
-	return token.IsLanguageIdentifierOrCallToken()
+	// Но НЕ keywords как 'for', 'if', 'while' и т.д.
+	if token.Type == lexer.TokenFor || token.Type == lexer.TokenIf || token.Type == lexer.TokenWhile ||
+		token.Type == lexer.TokenMatch || token.Type == lexer.TokenIn {
+		return false
+	}
+	result := token.IsLanguageIdentifierOrCallToken()
+	if h.verbose && result {
+		fmt.Printf("DEBUG: AssignmentHandler.CanHandle - token %s(%s) -> true\n", token.Type, token.Value)
+	}
+	return result
 }
 
 // Handle обрабатывает присваивание переменной
 func (h *AssignmentHandler) Handle(ctx *common.ParseContext) (interface{}, error) {
 	if h.verbose {
-		fmt.Printf("DEBUG: AssignmentHandler.Handle - ENTRY POINT\n")
+		fmt.Printf("DEBUG: AssignmentHandler.Handle - ENTRY POINT, current token: %s(%s)\n", ctx.TokenStream.Current().Type, ctx.TokenStream.Current().Value)
 	}
 	// Проверяем защиту от рекурсии
 	if err := ctx.Guard.Enter(); err != nil {
@@ -60,89 +70,142 @@ func (h *AssignmentHandler) Handle(ctx *common.ParseContext) (interface{}, error
 	// Потребляем идентификатор или языковой токен
 	identifierToken := ctx.TokenStream.Consume()
 	if h.verbose {
-		fmt.Printf("DEBUG: AssignmentHandler.Handle consumed token: %v\n", identifierToken)
+		fmt.Printf("DEBUG: AssignmentHandler.Handle consumed token: %v, IsLanguageIdentifierOrCallToken: %v\n", identifierToken, identifierToken.IsLanguageIdentifierOrCallToken())
 	}
 	if !identifierToken.IsLanguageIdentifierOrCallToken() {
-		return nil, fmt.Errorf("expected identifier or language token, got %s", identifierToken.Type)
+		if h.verbose {
+			fmt.Printf("DEBUG: AssignmentHandler - rejecting token %s(%s) as not language identifier or call token\n", identifierToken.Type, identifierToken.Value)
+		}
+		return nil, newErrorWithTokenPos(identifierToken, "expected identifier or language token, got %s", identifierToken.Type)
 	}
 
 	// Проверяем наличие знака присваивания
 	// Сначала пропускаем квалифицированную часть переменной (если есть)
 	var varToken lexer.Token
-	if ctx.TokenStream.HasMore() && ctx.TokenStream.Current().Type == lexer.TokenDot {
-		// Пропускаем DOT и следующий идентификатор или литерал
+	var hasIndexExpression bool
+	var indexStart int          // Позиция начала индексного выражения
+	var qualifiedParts []string // Собираем все части квалифицированного идентификатора
+
+	// Обрабатываем квалифицированные идентификаторы с множественными точками (py.data.users[0])
+	for ctx.TokenStream.HasMore() && ctx.TokenStream.Current().Type == lexer.TokenDot {
+		// Пропускаем DOT
 		ctx.TokenStream.Consume() // потребляем DOT
+
 		if !ctx.TokenStream.HasMore() || (ctx.TokenStream.Current().Type != lexer.TokenIdentifier &&
 			ctx.TokenStream.Current().Type != lexer.TokenTrue &&
 			ctx.TokenStream.Current().Type != lexer.TokenFalse) {
-			return nil, fmt.Errorf("expected identifier or literal after DOT")
+			return nil, newErrorWithPos(ctx.TokenStream, "expected identifier or literal after DOT")
 		}
-		varToken = ctx.TokenStream.Consume() // потребляем и сохраняем идентификатор или литерал
+
+		partToken := ctx.TokenStream.Consume() // потребляем и сохраняем идентификатор или литерал
+		qualifiedParts = append(qualifiedParts, partToken.Value)
+
 		if h.verbose {
-			fmt.Printf("DEBUG: AssignmentHandler - skipped qualified variable part, varToken: %v\n", varToken)
+			fmt.Printf("DEBUG: AssignmentHandler - collected qualified part: %v\n", partToken)
+		}
+
+		// Проверяем, не начинается ли индексное выражение после этой части
+		if ctx.TokenStream.HasMore() && ctx.TokenStream.Current().Type == lexer.TokenLBracket {
+			// Это последняя часть перед индексным выражением
+			varToken = partToken
+			break
+		}
+
+		// Проверяем, не является ли это концом левой части присваивания
+		// Если следующий токен - это оператор присваивания, то это последняя часть
+		if ctx.TokenStream.HasMore() && (ctx.TokenStream.Current().Type == lexer.TokenAssign || ctx.TokenStream.Current().Type == lexer.TokenColonEquals) {
+			varToken = partToken
+			break
+		}
+	}
+
+	// Если у нас есть квалифицированные части, но varToken не установлен (нет индексного выражения),
+	// то varToken - это последняя собранная часть
+	if len(qualifiedParts) > 0 && varToken.Value == "" {
+		varToken = lexer.Token{
+			Type:   lexer.TokenIdentifier,
+			Value:  qualifiedParts[len(qualifiedParts)-1],
+			Line:   identifierToken.Line,
+			Column: identifierToken.Column + len(identifierToken.Value) + 1,
+		}
+	}
+
+	// Проверяем наличие индексного выражения (для индексного присваивания arr[0] = value)
+	if ctx.TokenStream.HasMore() && ctx.TokenStream.Current().Type == lexer.TokenLBracket {
+		hasIndexExpression = true
+		// Сохраняем текущую позицию для последующего парсинга
+		indexStart = ctx.TokenStream.Position()
+
+		// Пропускаем индексное выражение [...] до закрывающей скобки
+		ctx.TokenStream.Consume() // потребляем '['
+		depth := 1
+		for ctx.TokenStream.HasMore() && depth > 0 {
+			token := ctx.TokenStream.Current()
+			if token.Type == lexer.TokenLBracket {
+				depth++
+			} else if token.Type == lexer.TokenRBracket {
+				depth--
+			}
+			ctx.TokenStream.Consume()
+		}
+		if h.verbose {
+			fmt.Printf("DEBUG: AssignmentHandler - detected index expression\n")
 		}
 	}
 
 	if h.verbose {
 		fmt.Printf("DEBUG: AssignmentHandler - checking for assignment operator, current token: %v\n", ctx.TokenStream.Current())
 	}
-	if !ctx.TokenStream.HasMore() || ctx.TokenStream.Current().Type != lexer.TokenAssign {
+	if !ctx.TokenStream.HasMore() || (ctx.TokenStream.Current().Type != lexer.TokenAssign && ctx.TokenStream.Current().Type != lexer.TokenColonEquals) {
 		if h.verbose {
 			fmt.Printf("DEBUG: AssignmentHandler - no assignment operator found, current token: %v\n", ctx.TokenStream.Current())
 		}
 		// Если нет знака присваивания, проверяем, не должен ли этот случай обрабатываться другим обработчиком
 
-		// Если следующий токен - DOT, это должен обрабатывать QualifiedVariableHandler или LanguageCallHandler
+		// Если следующий токен - DOT после индексного выражения, это может быть доступ к свойству индексированного объекта
 		if ctx.TokenStream.HasMore() && ctx.TokenStream.Current().Type == lexer.TokenDot {
-			if h.verbose {
-				fmt.Printf("DEBUG: AssignmentHandler - found DOT token, returning error\n")
+			if hasIndexExpression {
+				if h.verbose {
+					fmt.Printf("DEBUG: AssignmentHandler - found DOT after index expression, handling property access\n")
+				}
+				// Это случай вроде py.data.users[0].age = 26
+				// Обрабатываем это как вложенный IndexExpression
+				return h.handlePropertyAccessAfterIndex(ctx, identifierToken, varToken, qualifiedParts, indexStart)
+			} else {
+				if h.verbose {
+					fmt.Printf("DEBUG: AssignmentHandler - found DOT token, returning error\n")
+				}
+				return nil, newErrorWithPos(ctx.TokenStream, "expected identifier after DOT")
 			}
-			return nil, fmt.Errorf("expected identifier after DOT")
 		}
 
 		// Если есть еще токены и это не DOT и не LEFT_PAREN и не EOF и не NEWLINE, это недопустимый синтаксис
 		if ctx.TokenStream.HasMore() && ctx.TokenStream.Current().Type != lexer.TokenDot && ctx.TokenStream.Current().Type != lexer.TokenLeftParen && ctx.TokenStream.Current().Type != lexer.TokenNewline {
-			return nil, fmt.Errorf("unexpected token after identifier: %s", ctx.TokenStream.Current().Type)
+			return nil, newErrorWithPos(ctx.TokenStream, "unexpected token after identifier: %s", ctx.TokenStream.Current().Type)
 		}
 
 		// Если идентификатор является именем языка, это должен обрабатывать QualifiedVariableHandler
 		// Проверяем, является ли идентификатор поддерживаемым языком
 		languageRegistry := CreateDefaultLanguageRegistry()
 		if _, err := languageRegistry.ResolveAlias(identifierToken.Value); err == nil {
-			// Это имя языка, но без DOT - ошибка
-			return nil, fmt.Errorf("not a qualified variable")
+			// Это имя языка, но без DOT - позволяем другим обработчикам попробовать
+			return nil, nil
 		}
 
-		// Проверяем, является ли это "контекстом всего парсера" или "изолированным тестом"
-		// В изолированных тестах обычно есть только один токен и нет других обработчиков
-		// В контексте всего парсера простой идентификатор без квалификации - ошибка
-		// Мы используем эвристику: если идентификатор выглядит как "тестовый" (y, x, test), разрешаем его
-		// Если идентификатор выглядит как "реальный" (invalid, syntax, error), отклоняем его
-
-		testIdentifiers := map[string]bool{
-			"x": true, "y": true, "z": true, "test": true, "var": true,
-			"foo": true, "bar": true, "baz": true, "result": true, "maybe_false": true, "lua": true, "default": true,
-		}
-
-		if !testIdentifiers[identifierToken.Value] {
-			// Это не тестовый идентификатор - считаем ошибкой в контексте всего парсера
-			return nil, fmt.Errorf("not a qualified variable")
-		}
-
-		// Если нет знака присваивания и это не имя языка, это просто чтение переменной
-		identifier := ast.NewIdentifier(identifierToken, identifierToken.Value)
-		return ast.NewVariableRead(identifier), nil
+		// Если нет знака присваивания и это не имя языка, позволяем VariableReadHandler обработать
+		// (AssignmentHandler теперь не обрабатывает чтение переменных - это делает VariableReadHandler)
+		return nil, nil
 	}
 
 	// Потребляем знак присваивания
 	assignToken := ctx.TokenStream.Consume()
 	if assignToken.Type != lexer.TokenAssign {
-		return nil, fmt.Errorf("expected '=', got %s", assignToken.Type)
+		return nil, newErrorWithTokenPos(assignToken, "expected '=', got %s", assignToken.Type)
 	}
 
 	// Обрабатываем значение
 	if !ctx.TokenStream.HasMore() {
-		return nil, fmt.Errorf("expected value after '='")
+		return nil, newErrorWithPos(ctx.TokenStream, "expected value after '='")
 	}
 
 	var value ast.Expression
@@ -151,22 +214,94 @@ func (h *AssignmentHandler) Handle(ctx *common.ParseContext) (interface{}, error
 	// Проверяем, является ли значение вызовом функции LanguageCall или сложным выражением
 	currentToken := ctx.TokenStream.Current()
 
-	if currentToken.Type == lexer.TokenIdentifier {
-		// Клонируем поток для проверки LanguageCall без потребления токенов
-		clonedStream := ctx.TokenStream.Clone()
-		// Пробуем распарсить как LanguageCall
-		_, parseErr := h.parseLanguageCallValue(clonedStream)
-		if parseErr == nil {
-			// Если это LanguageCall, потребляем токены из оригинального потока
-			value, err = h.parseLanguageCallValue(ctx.TokenStream)
+	if h.verbose {
+		fmt.Printf("DEBUG: AssignmentHandler - parsing value, currentToken: %v (%s)\n", currentToken, currentToken.Type)
+	}
+
+	// ПЕРВОЕ - проверяем, может ли быть присваивание (идентификатор/язык + =)
+	// Это нужно для цепочного присваивания (a = b = 3) и (lua.x = lua.y = 5)
+	if currentToken.Type == lexer.TokenIdentifier || currentToken.IsLanguageToken() {
+		if h.verbose {
+			fmt.Printf("DEBUG: AssignmentHandler - currentToken is identifier or language token, checking for chained assignment\n")
+		}
+		// Сохраняем позицию для проверки
+		savedPos := ctx.TokenStream.Position()
+		ctx.TokenStream.Consume() // потребляем идентификатор или язык
+		
+		// Для языковых токенов нужно пропустить .identifier часть
+		shouldCheck := true
+		if currentToken.IsLanguageToken() {
+			// Проверяем, есть ли точка и идентификатор после языка
+			if ctx.TokenStream.HasMore() && ctx.TokenStream.Current().Type == lexer.TokenDot {
+				ctx.TokenStream.Consume() // потребляем точку
+				if ctx.TokenStream.HasMore() && ctx.TokenStream.Current().Type == lexer.TokenIdentifier {
+					ctx.TokenStream.Consume() // потребляем идентификатор
+				} else {
+					shouldCheck = false
+				}
+			} else {
+				shouldCheck = false
+			}
+		}
+		
+		if shouldCheck && ctx.TokenStream.HasMore() && ctx.TokenStream.Current().Type == lexer.TokenAssign {
+			// Это цепочное присваивание! Восстанавливаем позицию и обрабатываем рекурсивно
+			ctx.TokenStream.SetPosition(savedPos)
+			if h.verbose {
+				fmt.Printf("DEBUG: AssignmentHandler - detected chained assignment, parsing recursively\n")
+			}
+			result, err := h.Handle(ctx)
 			if err != nil {
 				return nil, err
 			}
+			
+			// result это VariableAssignment (которая реализует Expression интерфейс)
+			if va, ok := result.(ast.Expression); ok {
+				value = va
+				if h.verbose {
+					fmt.Printf("DEBUG: AssignmentHandler - successfully parsed chained assignment\n")
+				}
+			} else {
+				return nil, fmt.Errorf("unexpected result type from chained assignment: %T", result)
+			}
 		} else {
-			// Если не LanguageCall, это может быть сложное выражение (включая Elvis оператор)
-			value, err = h.parseComplexExpression(ctx)
-			if err != nil {
-				return nil, err
+			// Это не присваивание, восстанавливаем позицию
+			ctx.TokenStream.SetPosition(savedPos)
+			if h.verbose {
+				fmt.Printf("DEBUG: AssignmentHandler - not a chained assignment, checking other cases\n")
+			}
+			
+			if h.verbose {
+				fmt.Printf("DEBUG: AssignmentHandler - current token is identifier or language token: %v (%s)\n", currentToken, currentToken.Type)
+			}
+			// Клонируем поток для проверки LanguageCall без потребления токенов
+			clonedStream := ctx.TokenStream.Clone()
+			// Пробуем распарсить как LanguageCall
+			_, parseErr := h.parseLanguageCallValue(clonedStream)
+			if h.verbose {
+				fmt.Printf("DEBUG: AssignmentHandler - parseLanguageCallValue result: %v\n", parseErr)
+			}
+			if parseErr == nil {
+				// Если это LanguageCall, проверяем, есть ли после него операторы
+				if clonedStream.HasMore() && (clonedStream.Current().Type == lexer.TokenQuestion || isBinaryOperator(clonedStream.Current().Type)) {
+					// Есть операторы после LanguageCall, используем parseComplexExpression
+					value, err = h.parseComplexExpression(ctx)
+					if err != nil {
+						return nil, err
+					}
+				} else {
+					// Нет операторов после LanguageCall, потребляем токены из оригинального потока
+					value, err = h.parseLanguageCallValue(ctx.TokenStream)
+					if err != nil {
+						return nil, err
+					}
+				}
+			} else {
+				// Если не LanguageCall, это может быть сложное выражение (включая Elvis оператор)
+				value, err = h.parseComplexExpression(ctx)
+				if err != nil {
+					return nil, err
+				}
 			}
 		}
 	} else if currentToken.Type == lexer.TokenDoubleLeftAngle {
@@ -194,7 +329,7 @@ func (h *AssignmentHandler) Handle(ctx *common.ParseContext) (interface{}, error
 
 	// Если это языковой токен и мы уже обработали квалифицированную часть (varToken не пустой),
 	// создаем квалифицированный идентификатор
-	if identifierToken.IsLanguageToken() && varToken.Value != "" {
+	if identifierToken.IsLanguageToken() && (varToken.Value != "" || len(qualifiedParts) > 0) {
 		// Если значение уже было распарсено (например, сложное выражение),
 		// то квалифицированная часть уже была обработана в начале метода
 		// и нам нужно просто создать идентификатор на основе уже потребленных токенов
@@ -207,19 +342,38 @@ func (h *AssignmentHandler) Handle(ctx *common.ParseContext) (interface{}, error
 
 		// Создаем квалифицированный идентификатор
 		// Используем сохраненный varToken для получения правильного имени переменной
-		if varToken.Value == "" {
-			return nil, fmt.Errorf("internal error: expected qualified part to be consumed")
-		}
-
-		// Если varToken - это литерал (true, false), создаем специальный идентификатор
 		var varName string
-		if varToken.Type == lexer.TokenTrue || varToken.Type == lexer.TokenFalse {
-			varName = varToken.Value // Используем значение литерала как имя переменной
+		if varToken.Value != "" {
+			// Если varToken - это литерал (true, false), создаем специальный идентификатор
+			if varToken.Type == lexer.TokenTrue || varToken.Type == lexer.TokenFalse {
+				varName = varToken.Value // Используем значение литерала как имя переменной
+			} else {
+				varName = varToken.Value
+			}
+		} else if len(qualifiedParts) > 0 {
+			// Используем последнюю часть из qualifiedParts
+			varName = qualifiedParts[len(qualifiedParts)-1]
+			varToken = lexer.Token{
+				Type:   lexer.TokenIdentifier,
+				Value:  varName,
+				Line:   identifierToken.Line,
+				Column: identifierToken.Column + len(identifierToken.Value) + 1,
+			}
 		} else {
-			varName = varToken.Value
+			return nil, newErrorWithPos(ctx.TokenStream, "internal error: expected qualified part to be consumed")
 		}
 
-		identifier = ast.NewQualifiedIdentifier(identifierToken, varToken, language, varName)
+		// Для индексных присваиваний нам нужно использовать полный путь
+		// Создаем QualifiedIdentifierWithPath со всеми частями, включая последнюю как имя переменной
+		if len(qualifiedParts) > 0 {
+			// Создаем путь без последнего элемента (который является именем переменной)
+			pathParts := qualifiedParts[:len(qualifiedParts)-1]
+			identifier = ast.NewQualifiedIdentifierWithPath(identifierToken, varToken, language, pathParts, varName)
+		} else {
+			// Простая квалифицированная переменная
+			identifier = ast.NewQualifiedIdentifier(identifierToken, varToken, language, varName)
+		}
+
 		if h.verbose {
 			fmt.Printf("DEBUG: AssignmentHandler - created qualified identifier: language=%s, variable=%s, Qualified=%v\n", language, varName, identifier.Qualified)
 		}
@@ -238,7 +392,7 @@ func (h *AssignmentHandler) Handle(ctx *common.ParseContext) (interface{}, error
 			fmt.Printf("DEBUG: AssignmentHandler - checking for DOT after language token, current token: %v\n", ctx.TokenStream.Current())
 		}
 		if !ctx.TokenStream.HasMore() || ctx.TokenStream.Current().Type != lexer.TokenDot {
-			return nil, fmt.Errorf("expected '.' after language token '%s'", identifierToken.Type)
+			return nil, newErrorWithPos(ctx.TokenStream, "expected '.' after language token '%s'", identifierToken.Type)
 		}
 
 		// Потребляем DOT
@@ -246,7 +400,7 @@ func (h *AssignmentHandler) Handle(ctx *common.ParseContext) (interface{}, error
 
 		// Проверяем наличие идентификатора после DOT
 		if !ctx.TokenStream.HasMore() || ctx.TokenStream.Current().Type != lexer.TokenIdentifier {
-			return nil, fmt.Errorf("expected identifier after '.'")
+			return nil, newErrorWithPos(ctx.TokenStream, "expected identifier after '.'")
 		}
 
 		// Потребляем идентификатор
@@ -260,6 +414,61 @@ func (h *AssignmentHandler) Handle(ctx *common.ParseContext) (interface{}, error
 	} else {
 		// Обычный идентификатор
 		identifier = ast.NewIdentifier(identifierToken, identifierToken.Value)
+	}
+
+	// Если это индексное присваивание, создаем ExpressionAssignment с IndexExpression
+	if hasIndexExpression {
+		if h.verbose {
+			fmt.Printf("DEBUG: AssignmentHandler - creating ExpressionAssignment for index assignment\n")
+		}
+
+		// Сохраняем текущую позицию ПОСЛЕ парсинга значения
+		finalPos := ctx.TokenStream.Position()
+
+		// Создаем IndexExpression - нужно распарсить индексное выражение
+		// Для этого восстанавливаем позицию потока и парсим индекс
+		ctx.TokenStream.SetPosition(indexStart)
+
+		// Потребляем '['
+		ctx.TokenStream.Consume()
+
+		// Используем UnifiedExpressionParser для парсинга индексного выражения
+		exprParser := NewUnifiedExpressionParser(h.verbose)
+		indexExpr, err := exprParser.ParseExpression(ctx)
+		if err != nil {
+			return nil, newErrorWithPos(ctx.TokenStream, "failed to parse index expression: %v", err)
+		}
+
+		if h.verbose {
+			fmt.Printf("DEBUG: AssignmentHandler - successfully parsed index expression: %T\n", indexExpr)
+		}
+
+		// Проверяем и потребляем ']'
+		if !ctx.TokenStream.HasMore() || ctx.TokenStream.Current().Type != lexer.TokenRBracket {
+			return nil, newErrorWithPos(ctx.TokenStream, "expected ']' after index expression")
+		}
+		ctx.TokenStream.Consume()
+
+		// Восстанавливаем позицию ПОСЛЕ значения, чтобы корректно продвинуть поток
+		ctx.TokenStream.SetPosition(finalPos)
+
+		// Создаем IndexExpression
+		indexExpression := &ast.IndexExpression{
+			Object: identifier,
+			Index:  indexExpr,
+			Pos:    identifier.Position(),
+		}
+
+		if h.verbose {
+			fmt.Printf("DEBUG: AssignmentHandler - returning ExpressionAssignment with IndexExpression\n")
+		}
+
+		// Создаем и возвращаем ExpressionAssignment
+		return &ast.ExpressionAssignment{
+			Left:   indexExpression,
+			Assign: assignToken,
+			Value:  value,
+		}, nil
 	}
 
 	return ast.NewVariableAssignment(identifier, assignToken, value), nil
@@ -509,11 +718,17 @@ func (h *AssignmentHandler) parseBitstringSegment(tokenStream stream.TokenStream
 
 // parseLanguageCallValue парсит LanguageCall как значение в присваивании
 func (h *AssignmentHandler) parseLanguageCallValue(tokenStream stream.TokenStream) (*ast.LanguageCall, error) {
+	if h.verbose {
+		fmt.Printf("DEBUG: parseLanguageCallValue - ENTRY, current token: %v\n", tokenStream.Current())
+	}
 	// Create a language registry for resolving language aliases
 	languageRegistry := CreateDefaultLanguageRegistry()
 
 	// 1. Читаем язык (уже знаем, что это идентификатор)
 	languageToken := tokenStream.Consume()
+	if h.verbose {
+		fmt.Printf("DEBUG: parseLanguageCallValue - consumed language token: %v\n", languageToken)
+	}
 	language := languageToken.Value
 
 	// 2. Проверяем и разрешаем алиас через Language Registry
@@ -523,10 +738,16 @@ func (h *AssignmentHandler) parseLanguageCallValue(tokenStream stream.TokenStrea
 	}
 
 	// 3. Проверяем и потребляем DOT
+	if h.verbose {
+		fmt.Printf("DEBUG: parseLanguageCallValue - checking for DOT, current token: %v\n", tokenStream.Current())
+	}
 	if !tokenStream.HasMore() || tokenStream.Current().Type != lexer.TokenDot {
 		return nil, fmt.Errorf("expected DOT after language '%s'", language)
 	}
 	tokenStream.Consume() // Consuming dot
+	if h.verbose {
+		fmt.Printf("DEBUG: parseLanguageCallValue - consumed DOT, current token: %v\n", tokenStream.Current())
+	}
 
 	// 4. Читаем имя функции (может содержать точки, например, math.sqrt)
 	functionParts := []string{}
@@ -579,39 +800,64 @@ func (h *AssignmentHandler) parseLanguageCallValue(tokenStream stream.TokenStrea
 			}
 
 			// Читаем аргумент
-			argToken := tokenStream.Consume()
+			argToken := tokenStream.Current()
 			var arg ast.Expression
-			var err error
 
 			switch argToken.Type {
 			case lexer.TokenString:
+				tokenStream.Consume() // потребляем токен
 				arg = &ast.StringLiteral{
 					Value: argToken.Value,
 					Pos:   tokenToPosition(argToken),
 				}
 			case lexer.TokenNumber:
-				var num float64
-				_, err = fmt.Sscanf(argToken.Value, "%f", &num)
-				if err != nil {
+				tokenStream.Consume() // потребляем токен
+				numValue, parseErr := parseNumber(argToken.Value)
+				if parseErr != nil {
 					return nil, fmt.Errorf("invalid number format: %s", argToken.Value)
 				}
-				arg = &ast.NumberLiteral{
-					Value: num,
-					Pos:   tokenToPosition(argToken),
-				}
+				arg = createNumberLiteral(argToken, numValue)
 			case lexer.TokenIdentifier:
 				// Проверяем, не является ли это вложенным вызовом функции
 				if tokenStream.HasMore() && tokenStream.Current().Type == lexer.TokenDot {
 					// Это может быть вложенный вызов функции
+					tokenStream.Consume() // потребляем идентификатор перед вызовом parseNestedFunctionCall
 					nestedCall, err := h.parseNestedFunctionCall(tokenStream, argToken)
 					if err != nil {
 						return nil, fmt.Errorf("failed to parse nested function call argument: %v", err)
 					}
 					arg = nestedCall
 				} else {
+					tokenStream.Consume() // потребляем токен
 					arg = ast.NewIdentifier(argToken, argToken.Value)
 				}
+			case lexer.TokenLBrace:
+				// Обработка объектных литералов как аргументов функции
+				// Создаем временный контекст для парсинга объекта
+				tempCtx := &common.ParseContext{
+					TokenStream: tokenStream,
+					Parser:      nil,
+					Depth:       0,
+					MaxDepth:    100,
+					Guard:       &simpleRecursionGuard{maxDepth: 100},
+					LoopDepth:   0,
+					InputStream: "",
+				}
+				// Используем ObjectHandler для парсинга объекта
+				// Важно: не потребляем LBRACE здесь, ObjectHandler сделает это сам
+				objectHandler := NewObjectHandler(100, 0)
+				objectResult, err := objectHandler.Handle(tempCtx)
+				if err != nil {
+					return nil, fmt.Errorf("failed to parse object argument: %v", err)
+				}
+				if object, ok := objectResult.(*ast.ObjectLiteral); ok {
+					arg = object
+				} else {
+					return nil, fmt.Errorf("expected ObjectLiteral, got %T", objectResult)
+				}
 			default:
+				// Для всех остальных типов токенов, потребляем их и обрабатываем как обычно
+				tokenStream.Consume()
 				return nil, fmt.Errorf("unsupported argument type: %s", argToken.Type)
 			}
 
@@ -672,20 +918,12 @@ func (h *AssignmentHandler) parseSimpleValue(tokenStream stream.TokenStream, tok
 			},
 		}, nil
 	case lexer.TokenNumber:
-		// Преобразуем строку в число
-		var num float64
-		_, err := fmt.Sscanf(token.Value, "%f", &num)
+		// Преобразуем строку в число с поддержкой big.Int
+		numValue, err := parseNumber(token.Value)
 		if err != nil {
 			return nil, fmt.Errorf("invalid number format: %s", token.Value)
 		}
-		return &ast.NumberLiteral{
-			Value: num,
-			Pos: ast.Position{
-				Line:   token.Line,
-				Column: token.Column,
-				Offset: token.Position,
-			},
-		}, nil
+		return createNumberLiteral(token, numValue), nil
 	case lexer.TokenIdentifier:
 		return ast.NewIdentifier(token, token.Value), nil
 	default:
@@ -697,6 +935,29 @@ func (h *AssignmentHandler) parseSimpleValue(tokenStream stream.TokenStream, tok
 func (h *AssignmentHandler) parseExpression(tokenStream stream.TokenStream, token lexer.Token) (ast.Expression, error) {
 	// Проверяем, не является ли это унарным оператором
 	if h.isUnaryOperator(token.Type) {
+		// Для отрицательных чисел, проверяем, следующий токен - это число
+		if token.Type == lexer.TokenMinus && tokenStream.HasMore() && tokenStream.Current().Type == lexer.TokenNumber {
+			// Потребляем число
+			numberToken := tokenStream.Consume()
+
+			// Парсим число и создаем отрицательный NumberLiteral
+			numValue, err := parseNumber(numberToken.Value)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse number '%s': %v", numberToken.Value, err)
+			}
+
+			// Создаем отрицательное значение
+			switch v := numValue.(type) {
+			case *big.Int:
+				negativeInt := new(big.Int).Neg(v)
+				return createNumberLiteral(numberToken, negativeInt), nil
+			case float64:
+				return createNumberLiteral(numberToken, -v), nil
+			default:
+				return nil, fmt.Errorf("unsupported number type: %T", numValue)
+			}
+		}
+
 		// Токен уже потреблен, поэтому парсим операнд напрямую
 		if !tokenStream.HasMore() {
 			return nil, fmt.Errorf("unexpected EOF after unary operator %s", token.Type)
@@ -731,40 +992,21 @@ func (h *AssignmentHandler) parseExpression(tokenStream stream.TokenStream, toke
 		if h.verbose {
 			fmt.Printf("DEBUG: parseExpression - processing NUMBER token: %v (value: '%s')\n", token, token.Value)
 		}
-		// Преобразуем строку в число
-		var num float64
-
-		// Проверяем, является ли число шестнадцатеричным
-		if len(token.Value) > 2 && (token.Value[0:2] == "0x" || token.Value[0:2] == "0X") {
-			if h.verbose {
-				fmt.Printf("DEBUG: parseExpression - detected hexadecimal number: %s\n", token.Value)
-			}
-			// Парсим шестнадцатеричное число
-			var hexInt int64
-			_, err := fmt.Sscanf(token.Value, "0x%x", &hexInt)
-			if err != nil {
-				return nil, fmt.Errorf("invalid hexadecimal number format: %s", token.Value)
-			}
-			num = float64(hexInt)
-		} else {
-			// Парсим десятичное число
-			_, err := fmt.Sscanf(token.Value, "%f", &num)
-			if err != nil {
-				return nil, fmt.Errorf("invalid number format: %s", token.Value)
-			}
+		// Используем parseNumber для поддержки big.Int, hex, binary и decimal форматов
+		numValue, err := parseNumber(token.Value)
+		if err != nil {
+			return nil, fmt.Errorf("invalid number format: %s", token.Value)
 		}
 
 		if h.verbose {
-			fmt.Printf("DEBUG: parseExpression - created NumberLiteral with value: %f\n", num)
+			switch v := numValue.(type) {
+			case *big.Int:
+				fmt.Printf("DEBUG: parseExpression - created NumberLiteral with big.Int value: %s\n", v.String())
+			case float64:
+				fmt.Printf("DEBUG: parseExpression - created NumberLiteral with float64 value: %f\n", v)
+			}
 		}
-		return &ast.NumberLiteral{
-			Value: num,
-			Pos: ast.Position{
-				Line:   token.Line,
-				Column: token.Column,
-				Offset: token.Position,
-			},
-		}, nil
+		return createNumberLiteral(token, numValue), nil
 	case lexer.TokenIdentifier:
 		// Проверяем, не является ли это квалифицированной переменной или вызовом функции
 		return h.parseComplexIdentifier(tokenStream, token)
@@ -1058,7 +1300,7 @@ func (h *AssignmentHandler) parseFunctionCallWithParts(tokenStream stream.TokenS
 					InputStream: "",
 				}
 				// Используем UnaryExpressionHandler для парсинга унарных выражений
-				unaryHandler := NewUnaryExpressionHandler(config.ConstructHandlerConfig{})
+				unaryHandler := NewUnaryExpressionHandler(config.ConstructHandlerConfig{ConstructType: common.ConstructUnaryExpression})
 				result, err := unaryHandler.Handle(tempCtx)
 				if err != nil {
 					return nil, fmt.Errorf("failed to parse function argument: %v", err)
@@ -1271,7 +1513,7 @@ func (h *AssignmentHandler) isBitstringConcatenation(tokenStream stream.TokenStr
 // isUnaryOperator проверяет, является ли токен унарным оператором
 func (h *AssignmentHandler) isUnaryOperator(tokenType lexer.TokenType) bool {
 	switch tokenType {
-	case lexer.TokenPlus, lexer.TokenMinus, lexer.TokenNot, lexer.TokenTilde:
+	case lexer.TokenPlus, lexer.TokenMinus, lexer.TokenNot, lexer.TokenTilde, lexer.TokenAt:
 		return true
 	default:
 		return false
@@ -1282,24 +1524,47 @@ func (h *AssignmentHandler) isUnaryOperator(tokenType lexer.TokenType) bool {
 func (h *AssignmentHandler) parseComplexExpression(ctx *common.ParseContext) (ast.Expression, error) {
 	tokenStream := ctx.TokenStream
 
-	if h.verbose {
-		fmt.Printf("DEBUG: *** parseComplexExpression called, current token: %s (%s)\n", tokenStream.Current().Value, tokenStream.Current().Type)
-	}
-
 	if !tokenStream.HasMore() {
 		return nil, fmt.Errorf("unexpected EOF in complex expression")
 	}
 
 	// Парсим первый операнд как простой идентификатор или литерал
 	var leftExpr ast.Expression
-	var err error
 
 	currentToken := tokenStream.Current()
 
 	// Проверяем, не является ли это унарным оператором
 	if h.isUnaryOperator(currentToken.Type) {
+		// Для отрицательных чисел, проверяем, следующий токен - это число
+		if currentToken.Type == lexer.TokenMinus && tokenStream.HasMore() && tokenStream.Peek().Type == lexer.TokenNumber {
+			// Потребляем минус
+			tokenStream.Consume()
+
+			// Потребляем число
+			numberToken := tokenStream.Consume()
+
+			// Парсим число и создаем отрицательный NumberLiteral
+			numValue, err := parseNumber(numberToken.Value)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse number '%s': %v", numberToken.Value, err)
+			}
+
+			// Создаем отрицательное значение
+			switch v := numValue.(type) {
+			case *big.Int:
+				negativeInt := new(big.Int).Neg(v)
+				leftExpr = createNumberLiteral(numberToken, negativeInt)
+			case float64:
+				leftExpr = createNumberLiteral(numberToken, -v)
+			default:
+				return nil, fmt.Errorf("unsupported number type: %T", numValue)
+			}
+			// Продолжаем парсинг после отрицательного числа
+			goto continue_parsing
+		}
+
 		// Используем UnaryExpressionHandler для парсинга унарных выражений
-		unaryHandler := NewUnaryExpressionHandler(config.ConstructHandlerConfig{})
+		unaryHandler := NewUnaryExpressionHandler(config.ConstructHandlerConfig{ConstructType: common.ConstructUnaryExpression})
 		result, err := unaryHandler.Handle(ctx)
 		if err != nil {
 			return nil, err
@@ -1317,7 +1582,28 @@ func (h *AssignmentHandler) parseComplexExpression(ctx *common.ParseContext) (as
 
 	switch currentToken.Type {
 	case lexer.TokenIdentifier:
-		leftExpr = ast.NewIdentifier(currentToken, currentToken.Value)
+		// Проверяем, не является ли это вызовом builtin функции
+		if tokenStream.HasMore() && tokenStream.Peek().Type == lexer.TokenLeftParen {
+			// Это вызов builtin функции
+			builtinHandler := NewBuiltinFunctionHandlerWithVerbose(config.ConstructHandlerConfig{}, h.verbose)
+			result, err := builtinHandler.Handle(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse builtin function call: %v", err)
+			}
+
+			builtinCall, ok := result.(*ast.BuiltinFunctionCall)
+			if !ok {
+				return nil, fmt.Errorf("expected BuiltinFunctionCall, got %T", result)
+			}
+
+			leftExpr = builtinCall
+		} else {
+			// Простой идентификатор
+			leftExpr = ast.NewIdentifier(currentToken, currentToken.Value)
+			tokenStream.Consume()
+		}
+	case lexer.TokenNil:
+		leftExpr = ast.NewNilLiteral(currentToken)
 		tokenStream.Consume()
 	default:
 		// Проверяем, является ли токен языковым токеном
@@ -1326,74 +1612,84 @@ func (h *AssignmentHandler) parseComplexExpression(ctx *common.ParseContext) (as
 			if h.verbose {
 				fmt.Printf("DEBUG: parseComplexExpression - processing language token: %v\n", currentToken)
 			}
-			// Потребляем языковой токен перед вызовом parseQualifiedIdentifierOrFunctionCall
-			tokenStream.Consume()
-			var err error
-			leftExpr, err = h.parseQualifiedIdentifierOrFunctionCall(tokenStream, currentToken)
-			if err != nil {
-				if h.verbose {
-					fmt.Printf("DEBUG: parseComplexExpression - parseQualifiedIdentifierOrFunctionCall error: %v\n", err)
+
+			// Проверяем, есть ли следующий токен и является ли он DOT
+			if tokenStream.HasMore() && tokenStream.Peek().Type == lexer.TokenDot {
+				// Это может быть квалифицированная переменная или вызов функции
+				// Потребляем языковой токен перед вызовом parseQualifiedIdentifierOrFunctionCall
+				tokenStream.Consume()
+				var err error
+				leftExpr, err = h.parseQualifiedIdentifierOrFunctionCall(tokenStream, currentToken)
+				if err != nil {
+					if h.verbose {
+						fmt.Printf("DEBUG: parseComplexExpression - parseQualifiedIdentifierOrFunctionCall error: %v\n", err)
+					}
+					return nil, err
 				}
-				return nil, err
+				if h.verbose {
+					fmt.Printf("DEBUG: parseComplexExpression - successfully parsed qualified identifier: %v\n", leftExpr)
+				}
+			} else {
+				// Это просто языковой токен без DOT - не поддерживается в этом контексте
+				return nil, fmt.Errorf("language token '%s' not followed by DOT in expression context", currentToken.Value)
 			}
-			if h.verbose {
-				fmt.Printf("DEBUG: parseComplexExpression - successfully parsed qualified identifier: %v\n", leftExpr)
+
+			// Проверяем наличие индексного выражения [index] после квалифицированного идентификатора
+			if tokenStream.HasMore() && tokenStream.Current().Type == lexer.TokenLBracket {
+				if h.verbose {
+					fmt.Printf("DEBUG: parseComplexExpression - found LBRACKET after qualified identifier, parsing index expression\n")
+				}
+
+				// Потребляем открывающую скобку
+				tokenStream.Consume()
+
+				// Парсим индексное выражение
+				binaryHandler := NewBinaryExpressionHandler(config.ConstructHandlerConfig{})
+				tempCtx := &common.ParseContext{
+					TokenStream: tokenStream,
+					Parser:      ctx.Parser,
+					Depth:       ctx.Depth,
+					MaxDepth:    ctx.MaxDepth,
+					Guard:       ctx.Guard,
+					LoopDepth:   ctx.LoopDepth,
+					InputStream: ctx.InputStream,
+				}
+
+				// Сначала парсим первый операнд индексного выражения
+				leftOperand, err := binaryHandler.parseOperand(tempCtx)
+				if err != nil {
+					return nil, fmt.Errorf("failed to parse first operand in index expression: %v", err)
+				}
+
+				// Затем парсим полное индексное выражение, начиная с первого операнда
+				indexExpr, err := binaryHandler.ParseFullExpression(tempCtx, leftOperand)
+				if err != nil {
+					return nil, fmt.Errorf("failed to parse index expression: %v", err)
+				}
+
+				if h.verbose {
+					fmt.Printf("DEBUG: parseComplexExpression - successfully parsed index expression: %T\n", indexExpr)
+				}
+
+				// Проверяем наличие закрывающей скобки
+				if !tokenStream.HasMore() || tokenStream.Current().Type != lexer.TokenRBracket {
+					return nil, fmt.Errorf("expected ']' after index expression")
+				}
+
+				// Потребляем закрывающую скобку
+				tokenStream.Consume()
+
+				// Создаем индексное выражение
+				leftExpr = ast.NewIndexExpression(leftExpr, indexExpr, leftExpr.Position())
+
+				if h.verbose {
+					fmt.Printf("DEBUG: parseComplexExpression - created index expression: %T\n", leftExpr)
+				}
 			}
+			// После парсинга языкового токена, продолжаем проверять операторы
+			goto check_operators
 		} else {
 			return nil, fmt.Errorf("unsupported expression start: %s", currentToken.Type)
-		}
-
-		// Проверяем наличие индексного выражения [index] после квалифицированного идентификатора
-		if tokenStream.HasMore() && tokenStream.Current().Type == lexer.TokenLBracket {
-			if h.verbose {
-				fmt.Printf("DEBUG: parseComplexExpression - found LBRACKET after qualified identifier, parsing index expression\n")
-			}
-
-			// Потребляем открывающую скобку
-			tokenStream.Consume()
-
-			// Парсим индексное выражение
-			binaryHandler := NewBinaryExpressionHandler(config.ConstructHandlerConfig{})
-			tempCtx := &common.ParseContext{
-				TokenStream: tokenStream,
-				Parser:      ctx.Parser,
-				Depth:       ctx.Depth,
-				MaxDepth:    ctx.MaxDepth,
-				Guard:       ctx.Guard,
-				LoopDepth:   ctx.LoopDepth,
-				InputStream: ctx.InputStream,
-			}
-
-			// Сначала парсим первый операнд индексного выражения
-			leftOperand, err := binaryHandler.parseOperand(tempCtx)
-			if err != nil {
-				return nil, fmt.Errorf("failed to parse first operand in index expression: %v", err)
-			}
-
-			// Затем парсим полное индексное выражение, начиная с первого операнда
-			indexExpr, err := binaryHandler.ParseFullExpression(tempCtx, leftOperand)
-			if err != nil {
-				return nil, fmt.Errorf("failed to parse index expression: %v", err)
-			}
-
-			if h.verbose {
-				fmt.Printf("DEBUG: parseComplexExpression - successfully parsed index expression: %T\n", indexExpr)
-			}
-
-			// Проверяем наличие закрывающей скобки
-			if !tokenStream.HasMore() || tokenStream.Current().Type != lexer.TokenRBracket {
-				return nil, fmt.Errorf("expected ']' after index expression")
-			}
-
-			// Потребляем закрывающую скобку
-			tokenStream.Consume()
-
-			// Создаем индексное выражение
-			leftExpr = ast.NewIndexExpression(leftExpr, indexExpr, leftExpr.Position())
-
-			if h.verbose {
-				fmt.Printf("DEBUG: parseComplexExpression - created index expression: %T\n", leftExpr)
-			}
 		}
 	case lexer.TokenString:
 		leftExpr = &ast.StringLiteral{
@@ -1406,33 +1702,13 @@ func (h *AssignmentHandler) parseComplexExpression(ctx *common.ParseContext) (as
 		}
 		tokenStream.Consume()
 	case lexer.TokenNumber:
-		var num float64
-
-		// Проверяем, является ли число шестнадцатеричным
-		if len(currentToken.Value) > 2 && (currentToken.Value[0:2] == "0x" || currentToken.Value[0:2] == "0X") {
-			// Парсим шестнадцатеричное число
-			var hexInt int64
-			_, err = fmt.Sscanf(currentToken.Value, "0x%x", &hexInt)
-			if err != nil {
-				return nil, fmt.Errorf("invalid hexadecimal number format: %s", currentToken.Value)
-			}
-			num = float64(hexInt)
-		} else {
-			// Парсим десятичное число
-			_, err = fmt.Sscanf(currentToken.Value, "%f", &num)
-			if err != nil {
-				return nil, fmt.Errorf("invalid number format: %s", currentToken.Value)
-			}
+		// Используем parseNumber для поддержки big.Int, hex, binary и decimal форматов
+		numValue, err := parseNumber(currentToken.Value)
+		if err != nil {
+			return nil, fmt.Errorf("invalid number format: %s", currentToken.Value)
 		}
 
-		leftExpr = &ast.NumberLiteral{
-			Value: num,
-			Pos: ast.Position{
-				Line:   currentToken.Line,
-				Column: currentToken.Column,
-				Offset: currentToken.Position,
-			},
-		}
+		leftExpr = createNumberLiteral(currentToken, numValue)
 		tokenStream.Consume()
 	case lexer.TokenTrue, lexer.TokenFalse:
 		boolValue := currentToken.Type == lexer.TokenTrue
@@ -1513,23 +1789,31 @@ func (h *AssignmentHandler) parseComplexExpression(ctx *common.ParseContext) (as
 		} else {
 			return nil, fmt.Errorf("expected ArrayLiteral, got %T", arrayResult)
 		}
+		
+		// Парсим все индексные выражения [index][index]... в цикле
+		binaryHandler := NewBinaryExpressionHandler(config.ConstructHandlerConfig{})
+		for tokenStream.HasMore() && tokenStream.Current().Type == lexer.TokenLBracket {
+			indexExpr, err := binaryHandler.ParseIndexExpression(ctx, leftExpr)
+			if err != nil {
+				return nil, err
+			}
+			leftExpr = indexExpr
+		}
 	}
 
+check_operators:
 	// Проверяем наличие бинарных операторов (включая >, <, == и т.д.)
 	if tokenStream.HasMore() && isBinaryOperator(tokenStream.Current().Type) {
 		if h.verbose {
 			fmt.Printf("DEBUG: parseComplexExpression - found binary operator: %s (%s)\n", tokenStream.Current().Value, tokenStream.Current().Type)
 		}
-		// Используем BinaryExpressionHandler для парсинга бинарных выражений
-		binaryHandler := NewBinaryExpressionHandler(config.ConstructHandlerConfig{})
+		// Используем старую логику precedence climbing для совместимости
+		binaryHandler := NewBinaryExpressionHandlerWithVerbose(config.ConstructHandlerConfig{}, h.verbose)
 		result, err := binaryHandler.ParseFullExpression(ctx, leftExpr)
-		if h.verbose {
-			fmt.Printf("DEBUG: parseComplexExpression - ParseFullExpression result: %T, error: %v\n", result, err)
-		}
 		return result, err
 	}
 
-	// Проверяем наличие тернарного оператора (?)
+	// Проверяем наличие тернарного оператора (?) - это должно быть после всех случаев парсинга leftExpr
 	if tokenStream.HasMore() && tokenStream.Current().Type == lexer.TokenQuestion {
 		if h.verbose {
 			fmt.Printf("DEBUG: parseComplexExpression - found ternary operator: ?\n")
@@ -1543,21 +1827,35 @@ func (h *AssignmentHandler) parseComplexExpression(ctx *common.ParseContext) (as
 		return result, err
 	}
 
+continue_parsing:
 	// Проверяем наличие бинарных операторов (включая >, <, == и т.д.)
+	if h.verbose {
+		fmt.Printf("DEBUG: continue_parsing - current token: %s (%s), hasMore: %v\n", tokenStream.Current().Value, tokenStream.Current().Type, tokenStream.HasMore())
+	}
 	if tokenStream.HasMore() && isBinaryOperator(tokenStream.Current().Type) {
 		if h.verbose {
-			fmt.Printf("DEBUG: parseComplexExpression - found binary operator: %s (%s)\n", tokenStream.Current().Value, tokenStream.Current().Type)
+			fmt.Printf("DEBUG: parseComplexExpression - found binary operator after unary: %s (%s)\n", tokenStream.Current().Value, tokenStream.Current().Type)
 		}
-		// Используем BinaryExpressionHandler для парсинга бинарных выражений
-		binaryHandler := NewBinaryExpressionHandler(config.ConstructHandlerConfig{})
+		// Используем старую логику precedence climbing для совместимости
+		binaryHandler := NewBinaryExpressionHandlerWithVerbose(config.ConstructHandlerConfig{}, h.verbose)
 		result, err := binaryHandler.ParseFullExpression(ctx, leftExpr)
+		return result, err
+	}
+
+	// Проверяем наличие тернарного оператора (?) - это должно быть после всех случаев парсинга leftExpr
+	if tokenStream.HasMore() && tokenStream.Current().Type == lexer.TokenQuestion {
 		if h.verbose {
-			fmt.Printf("DEBUG: parseComplexExpression - ParseFullExpression result: %T, error: %v\n", result, err)
+			fmt.Printf("DEBUG: parseComplexExpression - found ternary operator after unary: ?\n")
+		}
+		// Используем BinaryExpressionHandler для парсинга тернарных выражений
+		binaryHandler := NewBinaryExpressionHandler(config.ConstructHandlerConfig{})
+		result, err := binaryHandler.ParseTernaryExpression(ctx, leftExpr)
+		if h.verbose {
+			fmt.Printf("DEBUG: parseComplexExpression - ParseTernaryExpression result: %T, error: %v\n", result, err)
 		}
 		return result, err
 	}
 
-continue_parsing:
 	// Если нет операторов, возвращаем левый операнд
 	if h.verbose {
 		fmt.Printf("DEBUG: parseComplexExpression - returning leftExpr: %T, current token: %s (%s)\n", leftExpr, tokenStream.Current().Value, tokenStream.Current().Type)
@@ -1567,6 +1865,15 @@ continue_parsing:
 			fmt.Printf("DEBUG: parseComplexExpression - no more tokens available\n")
 		}
 	}
+
+	// Special check: if we're in a parenthesized context and the current token is RIGHT_PAREN,
+	// we should NOT consume it - it belongs to the parent parser
+	if tokenStream.HasMore() && tokenStream.Current().Type == lexer.TokenRightParen {
+		if h.verbose {
+			fmt.Printf("DEBUG: parseComplexExpression - detected RIGHT_PAREN, not consuming it (belongs to parent)\n")
+		}
+	}
+
 	return leftExpr, nil
 }
 
@@ -1635,7 +1942,6 @@ func (h *AssignmentHandler) parseNestedFunctionCall(tokenStream stream.TokenStre
 			// Читаем аргумент
 			argToken := tokenStream.Consume()
 			var arg ast.Expression
-			var err error
 
 			switch argToken.Type {
 			case lexer.TokenString:
@@ -1644,15 +1950,11 @@ func (h *AssignmentHandler) parseNestedFunctionCall(tokenStream stream.TokenStre
 					Pos:   tokenToPosition(argToken),
 				}
 			case lexer.TokenNumber:
-				var num float64
-				_, err = fmt.Sscanf(argToken.Value, "%f", &num)
-				if err != nil {
+				numValue, parseErr := parseNumber(argToken.Value)
+				if parseErr != nil {
 					return nil, fmt.Errorf("invalid number format: %s", argToken.Value)
 				}
-				arg = &ast.NumberLiteral{
-					Value: num,
-					Pos:   tokenToPosition(argToken),
-				}
+				arg = createNumberLiteral(argToken, numValue)
 			case lexer.TokenIdentifier:
 				arg = ast.NewIdentifier(argToken, argToken.Value)
 			default:
@@ -1701,4 +2003,306 @@ func (h *AssignmentHandler) parseNestedFunctionCall(tokenStream stream.TokenStre
 	}
 
 	return node, nil
+}
+
+// handlePropertyAccessAfterIndex обрабатывает доступ к свойству после индексного выражения (py.data.users[0].age = value)
+func (h *AssignmentHandler) handlePropertyAccessAfterIndex(ctx *common.ParseContext, identifierToken, varToken lexer.Token, qualifiedParts []string, indexStart int) (interface{}, error) {
+	tokenStream := ctx.TokenStream
+
+	// Потребляем DOT после индексного выражения
+	dotToken := tokenStream.Consume()
+
+	// Проверяем, есть ли идентификатор после DOT
+	if !tokenStream.HasMore() || tokenStream.Current().Type != lexer.TokenIdentifier {
+		return nil, newErrorWithPos(ctx.TokenStream, "expected identifier after DOT for property access")
+	}
+
+	// Потребляем идентификатор свойства
+	propertyToken := tokenStream.Consume()
+
+	// Проверяем наличие оператора присваивания
+	if !tokenStream.HasMore() || (tokenStream.Current().Type != lexer.TokenAssign && tokenStream.Current().Type != lexer.TokenColonEquals) {
+		return nil, newErrorWithPos(ctx.TokenStream, "expected assignment operator after property access")
+	}
+
+	// Потребляем знак присваивания
+	assignToken := tokenStream.Consume()
+
+	// Обрабатываем значение
+	if !tokenStream.HasMore() {
+		return nil, newErrorWithPos(ctx.TokenStream, "expected value after '='")
+	}
+
+	var value ast.Expression
+	var err error
+
+	// Парсим значение
+	if h.verbose {
+		fmt.Printf("DEBUG: handlePropertyAccessAfterIndex - about to call parseComplexExpression, current token: %s (%s)\n", tokenStream.Current().Value, tokenStream.Current().Type)
+	}
+	value, err = h.parseComplexExpression(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Создаем квалифицированный идентификатор
+	language := identifierToken.LanguageTokenToString()
+	var varName string
+	if varToken.Value != "" {
+		varName = varToken.Value
+	} else if len(qualifiedParts) > 0 {
+		varName = qualifiedParts[len(qualifiedParts)-1]
+	} else {
+		return nil, newErrorWithPos(ctx.TokenStream, "internal error: expected qualified part to be consumed")
+	}
+
+	var identifier *ast.Identifier
+	if len(qualifiedParts) > 1 {
+		// Создаем путь без последнего элемента (который является именем переменной)
+		pathParts := qualifiedParts[:len(qualifiedParts)-1]
+		identifier = ast.NewQualifiedIdentifierWithPath(identifierToken, varToken, language, pathParts, varName)
+	} else {
+		// Простая квалифицированная переменная
+		identifier = ast.NewQualifiedIdentifier(identifierToken, varToken, language, varName)
+	}
+
+	// Восстанавливаем позицию потока для парсинга индексного выражения
+	ctx.TokenStream.SetPosition(indexStart)
+
+	// Потребляем '['
+	ctx.TokenStream.Consume()
+
+	// Используем UnifiedExpressionParser для парсинга индексного выражения
+	exprParser := NewUnifiedExpressionParser(h.verbose)
+	indexExpr, err := exprParser.ParseExpression(ctx)
+	if err != nil {
+		return nil, newErrorWithPos(ctx.TokenStream, "failed to parse index expression: %v", err)
+	}
+
+	// Проверяем и потребляем ']'
+	if !ctx.TokenStream.HasMore() || ctx.TokenStream.Current().Type != lexer.TokenRBracket {
+		return nil, newErrorWithPos(ctx.TokenStream, "expected ']' after index expression")
+	}
+	ctx.TokenStream.Consume()
+
+	// Создаем первый IndexExpression для py.data.users[0]
+	firstIndexExpr := &ast.IndexExpression{
+		Object: identifier,
+		Index:  indexExpr,
+		Pos:    identifier.Position(),
+	}
+
+	// Создаем второй IndexExpression для доступа к свойству .age
+	propertyIndex := &ast.StringLiteral{
+		Value: propertyToken.Value,
+		Pos: ast.Position{
+			Line:   propertyToken.Line,
+			Column: propertyToken.Column,
+			Offset: propertyToken.Position,
+		},
+	}
+
+	// Создаем вложенный IndexExpression
+	finalIndexExpr := &ast.IndexExpression{
+		Object: firstIndexExpr,
+		Index:  propertyIndex,
+		Pos: ast.Position{
+			Line:   dotToken.Line,
+			Column: dotToken.Column,
+			Offset: dotToken.Position,
+		},
+	}
+
+	if h.verbose {
+		fmt.Printf("DEBUG: handlePropertyAccessAfterIndex - created nested IndexExpression for property access\n")
+		fmt.Printf("DEBUG: handlePropertyAccessAfterIndex - current token after parsing value: %s (%s)\n", tokenStream.Current().Value, tokenStream.Current().Type)
+	}
+
+	// Создаем ExpressionAssignment
+	assignment := &ast.ExpressionAssignment{
+		Left:   finalIndexExpr,
+		Assign: assignToken,
+		Value:  value,
+	}
+
+	if h.verbose {
+		fmt.Printf("DEBUG: handlePropertyAccessAfterIndex - created assignment: %+v\n", assignment)
+	}
+
+	// Убедимся, что токен поток находится в правильной позиции после парсинга всего выражения
+	// Пропускаем любые оставшиеся токены до конца строки или EOF
+	for tokenStream.HasMore() && tokenStream.Current().Type != lexer.TokenNewline && tokenStream.Current().Type != lexer.TokenEOF {
+		if h.verbose {
+			fmt.Printf("DEBUG: handlePropertyAccessAfterIndex - skipping remaining token: %s (%s)\n", tokenStream.Current().Value, tokenStream.Current().Type)
+		}
+		tokenStream.Consume()
+	}
+
+	return assignment, nil
+}
+
+// collectExpressionTokens собирает токены выражения до разделителей
+func (h *AssignmentHandler) collectExpressionTokens(tokenStream stream.TokenStream) ([]lexer.Token, error) {
+	var tokens []lexer.Token
+	depth := 0
+
+	for tokenStream.HasMore() {
+		token := tokenStream.Current()
+
+		// Проверяем на разделители выражений (на уровне 0)
+		if depth == 0 {
+			if token.Type == lexer.TokenComma ||
+				token.Type == lexer.TokenSemicolon ||
+				token.Type == lexer.TokenNewline ||
+				token.Type == lexer.TokenEOF ||
+				token.Type == lexer.TokenIf ||
+				token.Type == lexer.TokenWhile ||
+				token.Type == lexer.TokenFor ||
+				token.Type == lexer.TokenMatch {
+				break
+			}
+		}
+
+		// Отслеживаем вложенность скобок
+		if token.Type == lexer.TokenLeftParen {
+			depth++
+		} else if token.Type == lexer.TokenRightParen {
+			depth--
+			if depth < 0 {
+				return nil, newErrorWithTokenPos(token, "unexpected closing bracket")
+			}
+		}
+
+		tokens = append(tokens, token)
+		tokenStream.Consume()
+	}
+
+	return tokens, nil
+}
+
+// expressionToTokens конвертирует выражение обратно в токены (приблизительно)
+func (h *AssignmentHandler) expressionToTokens(expr ast.Expression) ([]lexer.Token, error) {
+	// Это упрощенная реализация - конвертируем строковое представление обратно в токены
+	// В реальности нужна более сложная логика
+	exprStr := ""
+	if strExpr, ok := expr.(interface{ String() string }); ok {
+		exprStr = strExpr.String()
+	} else {
+		exprStr = fmt.Sprintf("%v", expr)
+	}
+
+	// Для простых случаев создаем токены на основе строки
+	var tokens []lexer.Token
+	pos := ast.Position{Line: 1, Column: 1, Offset: 0}
+
+	// Простой парсер - разбиваем по пробелам и операторам
+	// Это не идеально, но работает для базовых случаев
+	i := 0
+	for i < len(exprStr) {
+		// Пропускаем пробелы
+		for i < len(exprStr) && (exprStr[i] == ' ' || exprStr[i] == '\t') {
+			i++
+			pos.Column++
+		}
+		if i >= len(exprStr) {
+			break
+		}
+
+		start := i
+		if exprStr[i] == '"' || exprStr[i] == '\'' {
+			// Строка
+			quote := exprStr[i]
+			i++
+			for i < len(exprStr) && exprStr[i] != quote {
+				i++
+			}
+			if i < len(exprStr) {
+				i++ // включаем закрывающую кавычку
+			}
+			tokens = append(tokens, lexer.Token{
+				Type:     lexer.TokenString,
+				Value:    exprStr[start:i],
+				Line:     pos.Line,
+				Column:   pos.Column,
+				Position: pos.Offset,
+			})
+		} else if exprStr[i] >= '0' && exprStr[i] <= '9' {
+			// Число
+			for i < len(exprStr) && ((exprStr[i] >= '0' && exprStr[i] <= '9') || exprStr[i] == '.') {
+				i++
+			}
+			tokens = append(tokens, lexer.Token{
+				Type:     lexer.TokenNumber,
+				Value:    exprStr[start:i],
+				Line:     pos.Line,
+				Column:   pos.Column,
+				Position: pos.Offset,
+			})
+		} else if (exprStr[i] >= 'a' && exprStr[i] <= 'z') || (exprStr[i] >= 'A' && exprStr[i] <= 'Z') || exprStr[i] == '_' {
+			// Идентификатор
+			for i < len(exprStr) && ((exprStr[i] >= 'a' && exprStr[i] <= 'z') || (exprStr[i] >= 'A' && exprStr[i] <= 'Z') || (exprStr[i] >= '0' && exprStr[i] <= '9') || exprStr[i] == '_' || exprStr[i] == '.') {
+				i++
+			}
+			tokens = append(tokens, lexer.Token{
+				Type:     lexer.TokenIdentifier,
+				Value:    exprStr[start:i],
+				Line:     pos.Line,
+				Column:   pos.Column,
+				Position: pos.Offset,
+			})
+		} else {
+			// Оператор или символ
+			tokenLen := 1
+			if i+1 < len(exprStr) {
+				twoChar := exprStr[i : i+2]
+				if twoChar == "==" || twoChar == "!=" || twoChar == "<=" || twoChar == ">=" || twoChar == "&&" || twoChar == "||" {
+					tokenLen = 2
+				}
+			}
+			op := exprStr[start : start+tokenLen]
+			var tokenType lexer.TokenType
+			switch op {
+			case "==":
+				tokenType = lexer.TokenEqual
+			case "!=":
+				tokenType = lexer.TokenNotEqual
+			case "<":
+				tokenType = lexer.TokenLess
+			case ">":
+				tokenType = lexer.TokenGreater
+			case "<=":
+				tokenType = lexer.TokenLessEqual
+			case ">=":
+				tokenType = lexer.TokenGreaterEqual
+			case "&&":
+				tokenType = lexer.TokenAnd
+			case "||":
+				tokenType = lexer.TokenOr
+			case "+":
+				tokenType = lexer.TokenPlus
+			case "-":
+				tokenType = lexer.TokenMinus
+			case "*":
+				tokenType = lexer.TokenMultiply
+			case "/":
+				tokenType = lexer.TokenSlash
+			case "%":
+				tokenType = lexer.TokenModulo
+			default:
+				tokenType = lexer.TokenIdentifier // fallback
+			}
+			tokens = append(tokens, lexer.Token{
+				Type:     tokenType,
+				Value:    op,
+				Line:     pos.Line,
+				Column:   pos.Column,
+				Position: pos.Offset,
+			})
+			i += tokenLen
+		}
+		pos.Column += i - start
+		pos.Offset += i - start
+	}
+
+	return tokens, nil
 }

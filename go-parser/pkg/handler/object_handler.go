@@ -1,8 +1,6 @@
 package handler
 
 import (
-	"fmt"
-
 	"go-parser/pkg/ast"
 	"go-parser/pkg/common"
 	"go-parser/pkg/lexer"
@@ -39,7 +37,7 @@ func (h *ObjectHandler) Handle(ctx *common.ParseContext) (interface{}, error) {
 	// Потребляем открывающую фигурную скобку
 	openBrace := ctx.TokenStream.Consume()
 	if openBrace.Type != lexer.TokenLBrace {
-		return nil, fmt.Errorf("expected '{', got %s", openBrace.Type)
+		return nil, newErrorWithTokenPos(openBrace, "expected '{', got %s", openBrace.Type)
 	}
 
 	// Создаем узел объекта
@@ -90,7 +88,7 @@ func (h *ObjectHandler) Handle(ctx *common.ParseContext) (interface{}, error) {
 
 		// Проверяем наличие двоеточия
 		if ctx.TokenStream.Current().Type != lexer.TokenColon {
-			return nil, fmt.Errorf("expected ':' after key, got %s", ctx.TokenStream.Current().Type)
+			return nil, newErrorWithTokenPos(ctx.TokenStream.Current(), "expected ':' after key, got %s", ctx.TokenStream.Current().Type)
 		}
 		ctx.TokenStream.Consume() // Потребляем двоеточие
 
@@ -98,21 +96,70 @@ func (h *ObjectHandler) Handle(ctx *common.ParseContext) (interface{}, error) {
 		var value ast.Expression
 		var err error
 
-		// Используем AssignmentHandler для парсинга сложных выражений
-		assignmentHandler := NewAssignmentHandler(100, 0)
-		assignmentCtx := &common.ParseContext{
-			TokenStream: ctx.TokenStream,
-			Parser:      nil,
-			Depth:       ctx.Depth + 1,
-			MaxDepth:    ctx.MaxDepth,
-			Guard:       ctx.Guard,
-			LoopDepth:   ctx.LoopDepth,
-			InputStream: ctx.InputStream,
-		}
+		// Проверяем, является ли значение вложенным объектом
+		if ctx.TokenStream.Current().Type == lexer.TokenLBrace {
+			// Рекурсивно обрабатываем вложенный объект
+			nestedObjectHandler := NewObjectHandler(100, 0)
+			nestedCtx := &common.ParseContext{
+				TokenStream: ctx.TokenStream,
+				Parser:      nil,
+				Depth:       ctx.Depth + 1,
+				MaxDepth:    ctx.MaxDepth,
+				Guard:       ctx.Guard,
+				LoopDepth:   ctx.LoopDepth,
+				InputStream: ctx.InputStream,
+			}
 
-		value, err = assignmentHandler.parseComplexExpression(assignmentCtx)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse object value: %v", err)
+			nestedResult, err := nestedObjectHandler.Handle(nestedCtx)
+			if err != nil {
+				return nil, newErrorWithPos(ctx.TokenStream, "failed to parse nested object: %v", err)
+			}
+
+			if nestedObject, ok := nestedResult.(*ast.ObjectLiteral); ok {
+				value = nestedObject
+			} else {
+				return nil, newErrorWithPos(ctx.TokenStream, "expected ObjectLiteral, got %T", nestedResult)
+			}
+		} else if ctx.TokenStream.Current().Type == lexer.TokenLBracket {
+			// Рекурсивно обрабатываем вложенный массив
+			nestedArrayHandler := NewArrayHandler(100, 0)
+			nestedCtx := &common.ParseContext{
+				TokenStream: ctx.TokenStream,
+				Parser:      nil,
+				Depth:       ctx.Depth + 1,
+				MaxDepth:    ctx.MaxDepth,
+				Guard:       ctx.Guard,
+				LoopDepth:   ctx.LoopDepth,
+				InputStream: ctx.InputStream,
+			}
+
+			nestedResult, err := nestedArrayHandler.Handle(nestedCtx)
+			if err != nil {
+				return nil, newErrorWithPos(ctx.TokenStream, "failed to parse nested array: %v", err)
+			}
+
+			if nestedArray, ok := nestedResult.(*ast.ArrayLiteral); ok {
+				value = nestedArray
+			} else {
+				return nil, newErrorWithPos(ctx.TokenStream, "expected ArrayLiteral, got %T", nestedResult)
+			}
+		} else {
+			// Используем AssignmentHandler для парсинга сложных выражений
+			assignmentHandler := NewAssignmentHandler(100, 0)
+			assignmentCtx := &common.ParseContext{
+				TokenStream: ctx.TokenStream,
+				Parser:      nil,
+				Depth:       ctx.Depth + 1,
+				MaxDepth:    ctx.MaxDepth,
+				Guard:       ctx.Guard,
+				LoopDepth:   ctx.LoopDepth,
+				InputStream: ctx.InputStream,
+			}
+
+			value, err = assignmentHandler.parseComplexExpression(assignmentCtx)
+			if err != nil {
+				return nil, newErrorWithPos(ctx.TokenStream, "failed to parse object value: %v", err)
+			}
 		}
 
 		if key != nil && value != nil {
@@ -121,7 +168,7 @@ func (h *ObjectHandler) Handle(ctx *common.ParseContext) (interface{}, error) {
 	}
 
 	// Если дошли сюда, значит не нашли закрывающую скобку
-	return nil, fmt.Errorf("unclosed object")
+	return nil, newErrorWithPos(ctx.TokenStream, "unclosed object")
 }
 
 // Config возвращает конфигурацию обработчика

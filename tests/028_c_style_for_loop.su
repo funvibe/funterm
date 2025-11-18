@@ -1,0 +1,38 @@
+// C-style for loop test
+// Basic C-style for loop with initialization, condition, and increment
+for (i = 0; i < 3; i = i + 1) {
+    python.print(i)
+}
+
+i_g = 0
+for (; i_g < 5; i_g = i_g + 1) {
+    python.print(i_g)
+}
+
+// C-style for loop with empty condition (infinite loop with break)
+for (i = 0; ; i = i + 1) {
+    python.print(i)
+    if (i >= 2) {
+        break
+    }
+}
+
+// C-style for loop with empty increment
+for (i = 0; i < 3; ) {
+    python.print(i)
+    i = i + 1
+}
+
+// C-style for loop with all parts empty (infinite loop with break)
+for ;; {
+    python.print("infinite")
+    break
+}
+
+// C-style for loop with complex expressions
+for (count = 0; count < 2; count = count + 1) {
+    python.print("count:", count)
+    for (inner = 0; inner < 2; inner = inner + 1) {
+        python.print("inner:", inner)
+    }
+}

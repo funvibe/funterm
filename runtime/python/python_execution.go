@@ -1,12 +1,48 @@
 package python
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"strings"
 
 	"funterm/errors"
 )
+
+// preprocessArgsForJSON converts []byte to a special format that Python can recognize
+func preprocessArgsForJSON(args []interface{}) []interface{} {
+	result := make([]interface{}, len(args))
+	for i, arg := range args {
+		result[i] = preprocessValueForJSON(arg)
+	}
+	return result
+}
+
+func preprocessValueForJSON(value interface{}) interface{} {
+	switch v := value.(type) {
+	case []byte:
+		// Convert []byte to a special map that Python can recognize
+		return map[string]interface{}{
+			"base64_bytes": base64.StdEncoding.EncodeToString(v),
+		}
+	case []interface{}:
+		// Handle slices recursively
+		result := make([]interface{}, len(v))
+		for i, item := range v {
+			result[i] = preprocessValueForJSON(item)
+		}
+		return result
+	case map[string]interface{}:
+		// Handle maps recursively
+		result := make(map[string]interface{})
+		for k, val := range v {
+			result[k] = preprocessValueForJSON(val)
+		}
+		return result
+	default:
+		return value
+	}
+}
 
 func (pr *PythonRuntime) ensureModuleImported(functionName string) error {
 	parts := strings.Split(functionName, ".")
@@ -66,6 +102,31 @@ func (pr *PythonRuntime) ExecuteFunction(name string, args []interface{}) (inter
 		return nil, errors.NewRuntimeError("python", "RUNTIME_NOT_INITIALIZED", "runtime is not initialized")
 	}
 
+	// Check if function exists in local cache first
+	pr.mutex.RLock()
+	if cachedValue, exists := pr.variables[name]; exists {
+		pr.mutex.RUnlock()
+		// Check if it's a function marker
+		if funcMarker, ok := cachedValue.(map[string]interface{}); ok {
+			if isFunc, ok := funcMarker["__function__"].(bool); ok && isFunc {
+				if funcName, ok := funcMarker["__name__"].(string); ok && funcName == name {
+					// Function exists in cache, restore it to Python globals before calling
+					restoreCode := fmt.Sprintf(`
+# Restore function from cache if it doesn't exist
+if '%s' not in globals():
+    # Function was captured but deleted from globals, need to restore it
+    # This is a limitation - we can't actually restore the function object
+    # So we'll just proceed and let Python handle the error
+    pass
+`, name)
+					pr.sendAndAwait(restoreCode)
+				}
+			}
+		}
+	} else {
+		pr.mutex.RUnlock()
+	}
+
 	// Attempt to auto-import module if name suggests it (e.g., "datetime.timedelta")
 	if err := pr.ensureModuleImported(name); err != nil {
 		if pr.verbose {
@@ -81,15 +142,36 @@ func (pr *PythonRuntime) ExecuteFunction(name string, args []interface{}) (inter
 		}
 	}
 
-	argsJSON, err := json.Marshal(args)
+	// Preprocess arguments to handle []byte specially
+	preprocessedArgs := preprocessArgsForJSON(args)
+	argsJSON, err := json.Marshal(preprocessedArgs)
 	if err != nil {
 		return nil, errors.NewRuntimeError("python", "INVALID_ARGUMENT", fmt.Sprintf("failed to marshal arguments: %v", err))
 	}
 
 	var code string
 	if name == "print" {
-		// For print function, just execute it directly without json wrapping
-		code = fmt.Sprintf("%s(*json.loads('''%s'''))", name, string(argsJSON))
+		// For print function, filter out nil values and execute directly without json wrapping
+		// Convert args to JSON and back to handle preprocessing, then filter nils
+		var processedArgs []interface{}
+		if len(argsJSON) > 2 { // More than just "[]"
+			var tempArgs []interface{}
+			if err := json.Unmarshal(argsJSON, &tempArgs); err == nil {
+				for _, arg := range tempArgs {
+					if arg != nil {
+						processedArgs = append(processedArgs, arg)
+					}
+				}
+			}
+		}
+
+		if len(processedArgs) == 0 {
+			// If all args are nil or no args, just call print() without arguments
+			code = "print()"
+		} else {
+			processedArgsJSON, _ := json.Marshal(processedArgs)
+			code = fmt.Sprintf("%s(*json.loads('''%s'''))", name, string(processedArgsJSON))
+		}
 	} else {
 		// For other functions, just execute and let print() output be visible
 		if pr.verbose {
@@ -119,26 +201,47 @@ func (pr *PythonRuntime) ExecuteFunction(name string, args []interface{}) (inter
 		if isMixedArgs {
 			// Handle mixed positional and keyword arguments
 			mixedArgs := args[0].(map[string]interface{})
-			positionalJSON, _ := json.Marshal(mixedArgs["positional"])
-			keywordJSON, _ := json.Marshal(mixedArgs["keyword"])
-			callCode = fmt.Sprintf("%s(*json.loads('''%s'''), **json.loads('''%s'''))", name, string(positionalJSON), string(keywordJSON))
+			positionalPreprocessed := preprocessArgsForJSON(mixedArgs["positional"].([]interface{}))
+			keywordPreprocessed := preprocessValueForJSON(mixedArgs["keyword"])
+			positionalJSON, _ := json.Marshal(positionalPreprocessed)
+			keywordJSON, _ := json.Marshal(keywordPreprocessed)
+			callCode = fmt.Sprintf("%s(*_convert_bytes_in_args(json.loads('''%s''')), **_convert_bytes_in_args(json.loads('''%s''')))", name, string(positionalJSON), string(keywordJSON))
 		} else if isKwargs {
 			// Marshal just the map for keyword arguments
-			kwargsJSON, _ := json.Marshal(args[0])
-			callCode = fmt.Sprintf("%s(**json.loads('''%s'''))", name, string(kwargsJSON))
+			kwargsPreprocessed := preprocessValueForJSON(args[0])
+			kwargsJSON, _ := json.Marshal(kwargsPreprocessed)
+			callCode = fmt.Sprintf("%s(**_convert_bytes_in_args(json.loads('''%s''')))", name, string(kwargsJSON))
 		} else {
 			// Marshal all args for positional arguments
-			callCode = fmt.Sprintf("%s(*json.loads('''%s'''))", name, string(argsJSON))
+			callCode = fmt.Sprintf("%s(*_convert_bytes_in_args(json.loads('''%s''')))", name, string(argsJSON))
 		}
 
 		code = fmt.Sprintf(`
 import json
+import base64
+
+def _convert_bytes_in_args(data):
+    """Recursively convert base64-encoded byte arrays back to bytes"""
+    if isinstance(data, list):
+        return [_convert_bytes_in_args(item) for item in data]
+    elif isinstance(data, dict):
+        # Check if this looks like a base64-encoded byte array
+        if len(data) == 1 and 'base64_bytes' in data:
+            return base64.b64decode(data['base64_bytes'])
+        return {k: _convert_bytes_in_args(v) for k, v in data.items()}
+    else:
+        return data
+
 _result = %s
 if _result is not None:
 	try:
 		print(json.dumps(_result))
 	except TypeError:
-		print(json.dumps(str(_result)))
+		# Handle bytes objects specially
+		if isinstance(_result, bytes):
+			print(json.dumps({"base64_bytes": base64.b64encode(_result).decode('ascii')}))
+		else:
+			print(json.dumps(str(_result)))
 print('%s')
 `, callCode, uniqueMarker)
 		if pr.verbose {
@@ -199,6 +302,9 @@ print('%s')
 		fmt.Printf("DEBUG: JSON unmarshal successful: %v\n", result)
 	}
 
+	// Convert base64-encoded bytes back to []byte
+	result = pr.convertBase64BytesInResult(result)
+
 	// Check if the result represents None/null from Python
 	if result == nil || (output == "null") {
 		if pr.verbose {
@@ -214,6 +320,38 @@ print('%s')
 	}
 	// Don't reset outputCapture here - let the caller handle it via GetCapturedOutput()
 	return result, nil
+}
+
+// convertBase64BytesInResult recursively converts base64-encoded byte arrays back to []byte
+func (pr *PythonRuntime) convertBase64BytesInResult(data interface{}) interface{} {
+	switch v := data.(type) {
+	case map[string]interface{}:
+		// Check if this looks like a base64-encoded byte array
+		if len(v) == 1 {
+			if base64Str, ok := v["base64_bytes"]; ok {
+				if str, ok := base64Str.(string); ok {
+					if bytes, err := base64.StdEncoding.DecodeString(str); err == nil {
+						return bytes
+					}
+				}
+			}
+		}
+		// Recursively process map values
+		result := make(map[string]interface{})
+		for k, val := range v {
+			result[k] = pr.convertBase64BytesInResult(val)
+		}
+		return result
+	case []interface{}:
+		// Recursively process array elements
+		result := make([]interface{}, len(v))
+		for i, item := range v {
+			result[i] = pr.convertBase64BytesInResult(item)
+		}
+		return result
+	default:
+		return data
+	}
 }
 
 // ExecuteFunctionMultiple calls a function in the Python runtime and returns multiple values
@@ -517,7 +655,7 @@ import types
 import inspect
 
 # Create a safe serialization function
-def suterm_safe_serialize(obj):
+def funterm_safe_serialize(obj):
 	   try:
 	       # Try to serialize the object
 	       return json.dumps(obj)
@@ -526,9 +664,9 @@ def suterm_safe_serialize(obj):
 	       return str(obj)
 
 # Function to check if an object should be included
-def suterm_should_include(var_name, var_value):
-	   # Skip internal variables that start with "_"
-	   if var_name.startswith("_"):
+def funterm_should_include(var_name, var_value):
+	   # Skip system variables starting with __
+	   if var_name.startswith('__'):
 	       return False
 	   
 	   # Skip modules
@@ -544,29 +682,29 @@ def suterm_should_include(var_name, var_value):
 	       return False
 	   
 	   # Skip our own capture variables
-	   if var_name in ["suterm_safe_serialize", "suterm_should_include", "suterm_globals_dict", "suterm_global_names"]:
+	   if var_name in ["funterm_safe_serialize", "funterm_should_include", "funterm_globals_dict", "funterm_global_names"]:
 	       return False
 	   
 	   return True
 
 # Get all global variables from Python
-suterm_globals_dict = {}
+funterm_globals_dict = {}
 # Get a list of all global variable names first to avoid "dictionary changed size during iteration"
-suterm_global_names = list(globals().keys())
+funterm_global_names = list(globals().keys())
 
-for var_name in suterm_global_names:
+for var_name in funterm_global_names:
 	   try:
 	       var_value = globals()[var_name]
 	       # Check if we should include this variable
-	       if suterm_should_include(var_name, var_value):
+	       if funterm_should_include(var_name, var_value):
 	           # Try to serialize the value safely
-	           suterm_serialized = suterm_safe_serialize(var_value)
-	           suterm_globals_dict[var_name] = var_value
+	           funterm_serialized = funterm_safe_serialize(var_value)
+	           funterm_globals_dict[var_name] = var_value
 	   except:
 	       # Skip variables that can't be processed
 	       pass
 
-print(json.dumps(suterm_globals_dict))
+print(json.dumps(funterm_globals_dict))
 `
 
 	// Temporarily disable output capture for variable retrieval
@@ -682,55 +820,50 @@ import copy
 import types
 import inspect
 
-# Функция для безопасной сериализации объекта
-def suterm_safe_serialize(obj):
-    try:
-        # Пытаемся сериализовать объект
-        return json.dumps(obj)
-    except (TypeError, ValueError):
-        # Если сериализация не удалась, возвращаем строковое представление
-        return str(obj)
-
 # Функция для проверки, нужно ли включать переменную
-def suterm_should_include(var_name, var_value):
-    # Пропускаем внутренние переменные, которые начинаются с "_"
-    if var_name.startswith("_"):
-        return False
-    
-    # Пропускаем модули
-    if isinstance(var_value, types.ModuleType):
-        return False
-    
-    # Пропускаем функции
-    if isinstance(var_value, (types.FunctionType, types.BuiltinFunctionType, types.MethodType)):
-        return False
-    
-    # Пропускаем классы
-    if isinstance(var_value, type):
-        return False
-    
-    # Пропускаем наши собственные переменные для захвата
-    if var_name in ["suterm_safe_serialize", "suterm_should_include", "suterm_globals_dict"]:
-        return False
-    
-    # Проверяем, что переменная в списке для сохранения
-    return var_name in [%s]
+def funterm_should_include(var_name, var_value):
+		  # Пропускаем системные переменные начинающиеся с __
+		  if var_name.startswith('__'):
+		      return False
+		  
+		  # Пропускаем модули
+		  if isinstance(var_value, types.ModuleType):
+		      return False
+		  
+		  # Пропускаем классы
+		  if isinstance(var_value, type):
+		      return False
+		  
+		  # Пропускаем наши собственные переменные для захвата
+		  if var_name in ["funterm_should_include", "funterm_globals_dict"]:
+		      return False
+		  
+		  # Проверяем, что переменная в списке для сохранения
+		  return var_name in [%s]
 
 # Получаем указанные переменные из Python
-suterm_globals_dict = {}
+funterm_globals_dict = {}
 
 for var_name in [%s]:
-    try:
-        var_value = globals().get(var_name)
-        if var_value is not None and suterm_should_include(var_name, var_value):
-            # Пытаемся безопасно сериализовать значение
-            suterm_serialized = suterm_safe_serialize(var_value)
-            suterm_globals_dict[var_name] = var_value
-    except:
-        # Пропускаем переменные, которые не удалось обработать
-        pass
+		  try:
+		      var_value = globals().get(var_name)
+		      if var_value is not None and funterm_should_include(var_name, var_value):
+		          # Для функций сохраняем специальный маркер
+		          if isinstance(var_value, (types.FunctionType, types.BuiltinFunctionType, types.MethodType)):
+		              funterm_globals_dict[var_name] = {"__function__": True, "__name__": var_name}
+		          else:
+		              # Для других значений пытаемся сериализовать
+		              try:
+		                  json.dumps(var_value)  # Проверка сериализации
+		                  funterm_globals_dict[var_name] = var_value
+		              except (TypeError, ValueError):
+		                  # Если не сериализуется, сохраняем как строку
+		                  funterm_globals_dict[var_name] = str(var_value)
+		  except:
+		      # Пропускаем переменные, которые не удалось обработать
+		      pass
 
-print(json.dumps(suterm_globals_dict))
+print(json.dumps(funterm_globals_dict))
 `, strings.Join(variableNames, ", "), strings.Join(variableNames, ", "))
 
 		// Temporarily disable output capture for variable retrieval
@@ -745,6 +878,21 @@ print(json.dumps(suterm_globals_dict))
 		pr.mutex.Lock()
 		pr.outputCapture = originalCapture
 		pr.mutex.Unlock()
+
+		// After capturing variables, delete only non-function variables from Python global scope to prevent leakage
+		if err == nil && len(variables) > 0 {
+			cleanupCode := fmt.Sprintf(`
+# Delete captured non-function variables from global scope
+for var_name in [%s]:
+		  if var_name in globals():
+		      var_value = globals()[var_name]
+		      # Don't delete functions - they need to stay for later calls
+		      if not isinstance(var_value, (types.FunctionType, types.BuiltinFunctionType, types.MethodType)):
+		          del globals()[var_name]
+`, strings.Join(variableNames, ", "))
+
+			pr.sendAndAwait(cleanupCode)
+		}
 
 		if err != nil {
 			if pr.verbose {
@@ -795,6 +943,17 @@ print(json.dumps(suterm_globals_dict))
 	// This is important so the engine can read the captured output
 
 	return result, nil
+}
+
+// GetVariableFromRuntimeObject retrieves a variable from the runtime objects cache
+func (pr *PythonRuntime) GetVariableFromRuntimeObject(name string) (interface{}, error) {
+	pr.mutex.RLock()
+	defer pr.mutex.RUnlock()
+
+	if value, exists := pr.variables[name]; exists {
+		return value, nil
+	}
+	return nil, nil
 }
 
 // GetAllVariables returns all variables from the Python runtime

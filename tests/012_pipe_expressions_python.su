@@ -2,4 +2,5 @@ py {
     def to_upper(s):
         return s.upper()
 }
-py.to_upper("hello pipes") | lua.string.lower()
+result = py.to_upper("hello pipes") |> lua.string.lower()
+lua.print(result)

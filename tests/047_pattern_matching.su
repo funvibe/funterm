@@ -1,0 +1,6 @@
+<<symbol:2/bytes, rest/bytes>> = "Привет"
+<<a:8, b:8>> = <<255:16>>
+<<x:4, y:4, z:8>> = <<255:16>>
+<<data/bytes>> = "test"
+<<first:2/bytes, _/bytes>> = "Привет"
+print(first)

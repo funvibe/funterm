@@ -1,0 +1,7 @@
+data = <<4:8, 1:8, 2:8, 3:8, 4:8>>
+match data {
+    <<len:8, result:len/bytes>> -> {
+        lua.print("Simple var size result:", lua.string.format("0x%04X", result))
+    },
+    _ -> lua.print("No match")
+}

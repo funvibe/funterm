@@ -3,4 +3,4 @@ js {
         return s.toUpperCase();
     }
 }
-js.toUpper("hello pipes") | lua.string.lower()
+js.toUpper("hello pipes") |> lua.string.lower()

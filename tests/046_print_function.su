@@ -1,0 +1,54 @@
+print("hello world")
+print(42)
+print(true)
+print(nil)
+print([1, 2, 3])
+print({"key": "value", "number": 42})
+print(<<42:16>>)
+print("multiple", "args", 123)
+print([1, nil, 3])
+print({"nested": {"inner": true}})
+
+for i = 0, 10, 2 {
+    print("loop:", i)
+}
+
+# print in if-else blocks
+x = 15
+if x > 10 {
+    print("large")
+} else if x > 0 {
+    print("positive")
+} else {
+    print("non-positive")
+}
+
+# print in match statement
+status = 200
+match status {
+    200 -> print("OK")
+    404 -> print("Not Found")
+    _ -> print("Unknown")
+}
+
+# print in while loop
+counter = 0
+limit = 3
+while counter < limit {
+    counter = counter + 1
+    print("counter:", counter)
+}
+
+# print in C-style for loop
+for (i = 0; i < 3; i = i + 1) {
+    print("c-style:", i)
+}
+
+# print in nested blocks
+for i = 0, 2, 1 {
+    if i > 0 {
+        print("nested:", i)
+    } else {
+        print("start:", i)
+    }
+}

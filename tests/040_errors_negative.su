@@ -1,0 +1,8 @@
+start = 10
+end_val = 5
+data = <<1:8,2:8,3:8,4:8>>
+match data {
+    <<result:(start - end_val - 20)/binary>> -> {
+        lua.print("Should not reach here")
+    }
+}

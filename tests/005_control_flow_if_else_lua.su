@@ -1,6 +1,8 @@
 lua.x = 3
 if (lua.x > 5) {
     lua.result = "greater"
+} else if lua.x < 0 {
+    lua.result = "negative"
 } else {
     lua.result = "smaller"
 }

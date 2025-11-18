@@ -1,8 +1,6 @@
 package handler
 
 import (
-	"fmt"
-
 	"go-parser/pkg/ast"
 	"go-parser/pkg/common"
 	"go-parser/pkg/config"
@@ -34,14 +32,13 @@ func (h *BreakHandler) Handle(ctx *common.ParseContext) (interface{}, error) {
 	// 1. Проверяем токен 'break'
 	breakToken := tokenStream.Current()
 	if breakToken.Type != lexer.TokenBreak {
-		return nil, fmt.Errorf("expected 'break', got %s", breakToken.Type)
+		return nil, newErrorWithTokenPos(breakToken, "expected 'break', got %s", breakToken.Type)
 	}
 
 	// 2. КОНТЕКСТНАЯ ВАЛИДАЦИЯ (ОБЯЗАТЕЛЬНО по ТЗ)
 	// Проверяем, что break используется внутри цикла
 	if ctx.LoopDepth <= 0 {
-		return nil, fmt.Errorf("break statement can only be used inside a loop at line %d, column %d",
-			breakToken.Line, breakToken.Column)
+		return nil, newErrorWithTokenPos(breakToken, "break statement can only be used inside a loop")
 	}
 
 	// 3. Потребляем токен 'break'

@@ -1,4 +1,6 @@
 py.numbers = [1, 2, 3]
 py.total = 0
-for item in py.numbers: py.total = py.total + item
+for item in py.numbers {
+    py.total = py.total + item
+}
 py.print(py.total)

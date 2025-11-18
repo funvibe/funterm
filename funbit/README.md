@@ -5,8 +5,9 @@ Funbit is a comprehensive Go library that provides **full Erlang/OTP bit syntax 
 ## ✨ Key Features
 
 - **🎯 True Erlang Compatibility**: Direct 1:1 mapping of Erlang bit syntax to Go API
-- **⚡ True Bit-Level Operations**: Operates as a genuine bit stream, not byte-aligned segments  
+- **⚡ True Bit-Level Operations**: Operates as a genuine bit stream, not byte-aligned segments
 - **🔢 Rich Data Types**: Integer, float (16/32/64-bit), binary, bitstring, UTF-8/16/32
+- **🔢 Arbitrary-Precision Integers**: Full `*big.Int` support for huge integers without precision loss
 - **📐 Dynamic & Expression-Based Sizing**: Variables and arithmetic expressions (`total-6`)
 - **🔢 Unit Multipliers**: Size multiplication with `unit:N` (e.g., `32/float-unit:2` = 64-bit double)
 - **🌐 Full Endianness Support**: Big, little, and native byte ordering
@@ -100,6 +101,7 @@ package main
 
 import (
     "fmt"
+    "math/big"
     "github.com/funvibe/funbit/pkg/funbit"
 )
 
@@ -125,6 +127,16 @@ func main() {
         fmt.Printf("Value: %d, Text: %s\n", value, string(text))
         // Output: Value: 42, Text: hello
     }
+    
+    // Big.Int support for huge integers
+    hugeInt := new(big.Int)
+    hugeInt.SetString("999999999999999999999999999999", 10)
+    
+    builder2 := funbit.NewBuilder()
+    funbit.AddInteger(builder2, hugeInt, funbit.WithSize(256)) // 256-bit integer
+    
+    bitstring2, _ := funbit.Build(builder2)
+    fmt.Printf("Huge integer bitstring: %d bits\n", bitstring2.Length())
 }
 ```
 
@@ -413,6 +425,7 @@ Funbit automatically validates pattern sizes unless:
 |---------------|-------------------|-------------|
 | `<<42:8>>` | `funbit.AddInteger(b, 42, funbit.WithSize(8))` | 8-bit integer |
 | `<<42:8/big>>` | `funbit.AddInteger(b, 42, funbit.WithSize(8), funbit.WithEndianness("big"))` | Big-endian integer |
+| `<<999999999999999999999:256>>` | `hugeInt := new(big.Int); hugeInt.SetString("999999999999999999999", 10); funbit.AddInteger(b, hugeInt, funbit.WithSize(256))` | Arbitrary-precision integer |
 | `<<3.14:32/float>>` | `funbit.AddFloat(b, 3.14, funbit.WithSize(32))` | 32-bit float |
 | `<<"hello world"/binary>>` | `funbit.AddBinary(b, []byte("hello world"))` | Binary data (full) |
 | `<<"hello world":5/binary>>` | `funbit.AddBinary(b, []byte("hello world"), funbit.WithSize(5))` | Binary data (truncated to 5 bytes: "hello") |
@@ -429,6 +442,51 @@ Funbit automatically validates pattern sizes unless:
 - Funbit requires variable registration for dynamic sizes
 - Funbit supports method chaining and error accumulation
 - Funbit provides stronger type safety with Go's type system
+- Funbit supports arbitrary-precision integers via `*big.Int` for huge numbers
+
+## 🔢 Arbitrary-Precision Integer Support
+
+Funbit now supports `*big.Int` for handling arbitrarily large integers without precision loss:
+
+```go
+import "math/big"
+
+// Create a huge integer
+hugeInt := new(big.Int)
+hugeInt.SetString("999999999999999999999999999999", 10) // 30 digits
+
+// Add to bitstring with appropriate size
+builder := funbit.NewBuilder()
+funbit.AddInteger(builder, hugeInt, funbit.WithSize(256)) // 256-bit integer
+
+bitstring, err := funbit.Build(builder)
+if err != nil {
+    log.Fatalf("Failed to build: %v", err)
+}
+
+// Pattern matching extracts as *big.Int
+matcher := funbit.NewMatcher()
+var extracted *big.Int
+funbit.Integer(matcher, &extracted, funbit.WithSize(256))
+
+results, err := funbit.Match(matcher, bitstring)
+if err == nil && len(results) > 0 {
+    fmt.Printf("Extracted: %s\n", extracted.String()) // Full precision
+}
+```
+
+**Benefits:**
+- **No Precision Loss**: Handle numbers larger than `float64` can represent
+- **Exact Arithmetic**: Perfect for cryptographic applications, large IDs, etc.
+- **Automatic Detection**: Funbit automatically uses `*big.Int` when needed
+- **Backward Compatible**: Regular `int` values continue to work as before
+
+**Use Cases:**
+- Cryptographic keys and hashes
+- Large database IDs
+- Financial calculations with high precision
+- Scientific computing with large numbers
+- Protocol fields with arbitrary size
 
 ## 📊 Performance Notes
 

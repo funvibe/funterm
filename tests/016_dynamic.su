@@ -1,10 +1,10 @@
 lua.values = [1, 2, 3, 4, 5]
 lua.result = <<>>
 
-for i = 0, 4 do
+for i = 0, 5 {
     lua.value = lua.values[i]
     lua.result = <<lua.result/binary, lua.value:8>>
-end
+}
 
 match lua.result {
     <<a:8, b:8, c:8, d:8, e:8>> -> {
@@ -15,7 +15,9 @@ match lua.result {
 # Построение с условиями
 lua.flags = [true, false, true]
 lua.flag_bits = <<>>
-for flag in lua.flags: lua.flag_bits = <<lua.flag_bits/bitstring, (flag ? 1 : 0):1>>
+for flag in lua.flags {
+    lua.flag_bits = <<lua.flag_bits/bitstring, (flag ? 1 : 0):1>>
+}
 
 lua.flag_bits = <<lua.flag_bits/bitstring, 0:5>>  # Padding до байта
 

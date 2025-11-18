@@ -77,8 +77,8 @@ func (h *BitstringPatternAssignmentHandler) Handle(ctx *common.ParseContext) (in
 	}
 
 	// Проверяем наличие знака присваивания
-	if !ctx.TokenStream.HasMore() || ctx.TokenStream.Current().Type != lexer.TokenAssign {
-		return nil, fmt.Errorf("expected '=' after bitstring pattern, got %s", ctx.TokenStream.Current().Type)
+	if !ctx.TokenStream.HasMore() || (ctx.TokenStream.Current().Type != lexer.TokenAssign && ctx.TokenStream.Current().Type != lexer.TokenColonEquals) {
+		return nil, fmt.Errorf("expected '=' or ':=' after bitstring pattern, got %s", ctx.TokenStream.Current().Type)
 	}
 
 	assignToken := ctx.TokenStream.Consume()
@@ -129,8 +129,11 @@ func (h *BitstringPatternAssignmentHandler) parseValue(ctx *common.ParseContext)
 		return &ast.StringLiteral{Value: token.Value, Raw: token.Value, Pos: tokenToPosition(token)}, nil
 	case lexer.TokenNumber:
 		token := ctx.TokenStream.Consume()
-		value := parseFloat(token.Value)
-		return &ast.NumberLiteral{Value: value, Pos: tokenToPosition(token)}, nil
+		value, err := parseNumber(token.Value)
+		if err != nil {
+			return nil, fmt.Errorf("invalid number format: %s", token.Value)
+		}
+		return createNumberLiteral(token, value), nil
 	case lexer.TokenIdentifier:
 		// Может быть qualified variable
 		identifierToken := ctx.TokenStream.Consume()

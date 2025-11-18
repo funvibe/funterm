@@ -1,0 +1,49 @@
+{
+  "name": "funterm-syntax",
+  "displayName": "Funterm Syntax Highlighting",
+  "description": "Syntax highlighting for Funterm (.su) files",
+  "version": "1.0.0",
+  "publisher": "funterm",
+  "engines": {
+    "vscode": "^1.60.0"
+  },
+  "categories": [
+    "Languages"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "funterm",
+        "aliases": [
+          "Funterm",
+          "funterm",
+          "su"
+        ],
+        "extensions": [
+          ".su"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "funterm",
+        "scopeName": "source.funterm",
+        "path": "./syntax/funterm.tmLanguage.json"
+      }
+    ]
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/funterm/funterm-syntax"
+  },
+  "keywords": [
+    "funterm",
+    "syntax",
+    "highlighting",
+    "repl",
+    "multi-language"
+  ],
+  "author": "Funterm Team",
+  "license": "MIT"
+}

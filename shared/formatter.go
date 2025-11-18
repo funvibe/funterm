@@ -2,6 +2,7 @@ package shared
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/funvibe/funbit/pkg/funbit"
@@ -12,7 +13,7 @@ import (
 func FormatValueForDisplay(value interface{}) string {
 	switch v := value.(type) {
 	case *BitstringObject:
-		// Display bitstrings in byte format: <<42,0,0,0>>
+		// Display in byte format: <<42,0,0,0>>
 		return formatBitstringAsBytes(v.BitString)
 
 	case BitstringByte:
@@ -32,10 +33,48 @@ func FormatValueForDisplay(value interface{}) string {
 		// For unsigned integer types, use decimal formatting
 		return fmt.Sprintf("%d", value)
 
+	case nil:
+		// For nil values, use "nil" instead of "<nil>"
+		return "nil"
+
+	case []interface{}:
+		// Format arrays with commas: [1, 5]
+		if len(v) == 0 {
+			return "[]"
+		}
+		var elements []string
+		for _, elem := range v {
+			elements = append(elements, FormatValueForDisplay(elem))
+		}
+		return "[" + strings.Join(elements, ", ") + "]"
+
+	case map[string]interface{}:
+		// Format objects without "map" prefix: {"key": value}
+		if len(v) == 0 {
+			return "{}"
+		}
+		var keys []string
+		for key := range v {
+			keys = append(keys, key)
+		}
+		// Sort keys for consistent output
+		sort.Strings(keys)
+		var pairs []string
+		for _, key := range keys {
+			pairs = append(pairs, fmt.Sprintf("\"%s\": %s", key, FormatValueForDisplay(v[key])))
+		}
+		return "{" + strings.Join(pairs, ", ") + "}"
+
 	default:
 		// For all other types, use standard string conversion
 		return fmt.Sprintf("%v", value)
 	}
+}
+
+
+// PreFormattedResult represents a value that is already formatted for display
+type PreFormattedResult struct {
+	Value string
 }
 
 // formatBitstringAsBytes formats a bitstring as <<42,0,0,0>> or <<1, 0, 1, 0, 1, 0, 0, 1>>

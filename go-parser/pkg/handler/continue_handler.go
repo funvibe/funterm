@@ -1,8 +1,6 @@
 package handler
 
 import (
-	"fmt"
-
 	"go-parser/pkg/ast"
 	"go-parser/pkg/common"
 	"go-parser/pkg/config"
@@ -34,14 +32,13 @@ func (h *ContinueHandler) Handle(ctx *common.ParseContext) (interface{}, error) 
 	// 1. Проверяем токен 'continue'
 	continueToken := tokenStream.Current()
 	if continueToken.Type != lexer.TokenContinue {
-		return nil, fmt.Errorf("expected 'continue', got %s", continueToken.Type)
+		return nil, newErrorWithTokenPos(continueToken, "expected 'continue', got %s", continueToken.Type)
 	}
 
 	// 2. КОНТЕКСТНАЯ ВАЛИДАЦИЯ (ОБЯЗАТЕЛЬНО по ТЗ)
 	// Проверяем, что continue используется внутри цикла
 	if ctx.LoopDepth <= 0 {
-		return nil, fmt.Errorf("continue statement can only be used inside a loop at line %d, column %d",
-			continueToken.Line, continueToken.Column)
+		return nil, newErrorWithTokenPos(continueToken, "continue statement can only be used inside a loop")
 	}
 
 	// 3. Потребляем токен 'continue'

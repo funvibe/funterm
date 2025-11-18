@@ -1,6 +1,6 @@
 js.numbers = [1, 2, 3]
 js.total = 0
-for i = 0, 2 do
+for i = 0, 3 {
     js.total = js.total + js.numbers[i]
-end
+}
 js.print(js.total)

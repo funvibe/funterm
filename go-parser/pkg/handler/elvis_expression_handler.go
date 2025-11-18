@@ -33,26 +33,26 @@ func (h *ElvisExpressionHandler) Handle(ctx *common.ParseContext) (interface{}, 
 
 	// Проверяем, есть ли токен присваивания
 	if !tokenStream.HasMore() {
-		return nil, fmt.Errorf("unexpected EOF in Elvis expression")
+		return nil, newErrorWithPos(tokenStream, "unexpected EOF in Elvis expression")
 	}
 
 	// Потребляем левый операнд (идентификатор)
 	leftToken := tokenStream.Current()
 	if leftToken.Type != lexer.TokenIdentifier {
-		return nil, fmt.Errorf("expected identifier for Elvis expression, got %s", leftToken.Type)
+		return nil, newErrorWithTokenPos(leftToken, "expected identifier for Elvis expression, got %s", leftToken.Type)
 	}
 	tokenStream.Consume()
 
 	// Проверяем наличие оператора присваивания
-	if !tokenStream.HasMore() || tokenStream.Current().Type != lexer.TokenAssign {
-		return nil, fmt.Errorf("expected '=' after identifier in Elvis expression")
+	if !tokenStream.HasMore() || (tokenStream.Current().Type != lexer.TokenAssign && tokenStream.Current().Type != lexer.TokenColonEquals) {
+		return nil, newErrorWithPos(tokenStream, "expected '=' or ':=' after identifier in Elvis expression")
 	}
-	tokenStream.Consume() // потребляем '='
+	tokenStream.Consume() // потребляем '=' или ':='
 
 	// Теперь парсим правую часть как Elvis выражение
 	rightExpr, err := h.ParseFullExpression(ctx, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse right side of Elvis expression: %v", err)
+		return nil, newErrorWithPos(tokenStream, "failed to parse right side of Elvis expression: %v", err)
 	}
 
 	// Создаем VariableAssignment с Elvis выражением
@@ -87,7 +87,7 @@ func (h *ElvisExpressionHandler) ParseFullExpression(ctx *common.ParseContext, l
 
 	// Проверяем наличие :
 	if !tokenStream.HasMore() || tokenStream.Current().Type != lexer.TokenColon {
-		return nil, fmt.Errorf("expected ':' after '?' in Elvis expression")
+		return nil, newErrorWithPos(tokenStream, "expected ':' after '?' in Elvis expression")
 	}
 
 	// Потребляем :
@@ -96,7 +96,7 @@ func (h *ElvisExpressionHandler) ParseFullExpression(ctx *common.ParseContext, l
 	// Читаем правый операнд
 	rightExpr, err := h.parseOperand(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse right operand in Elvis expression: %v", err)
+		return nil, newErrorWithPos(tokenStream, "failed to parse right operand in Elvis expression: %v", err)
 	}
 
 	// Создаем Elvis выражение
@@ -111,7 +111,7 @@ func (h *ElvisExpressionHandler) parseOperand(ctx *common.ParseContext) (ast.Exp
 	tokenStream := ctx.TokenStream
 
 	if !tokenStream.HasMore() {
-		return nil, fmt.Errorf("unexpected EOF in operand")
+		return nil, newErrorWithPos(tokenStream, "unexpected EOF in operand")
 	}
 
 	token := tokenStream.Current()
@@ -141,14 +141,11 @@ func (h *ElvisExpressionHandler) parseOperand(ctx *common.ParseContext) (ast.Exp
 	case lexer.TokenNumber:
 		// Числовой литерал
 		tokenStream.Consume()
-		return &ast.NumberLiteral{
-			Value: parseFloat(token.Value),
-			Pos: ast.Position{
-				Line:   token.Line,
-				Column: token.Column,
-				Offset: token.Position,
-			},
-		}, nil
+		numValue, err := parseNumber(token.Value)
+		if err != nil {
+			return nil, newErrorWithTokenPos(token, "invalid number format: %s", token.Value)
+		}
+		return createNumberLiteral(token, numValue), nil
 
 	case lexer.TokenString:
 		// Строковой литерал
@@ -186,14 +183,14 @@ func (h *ElvisExpressionHandler) parseOperand(ctx *common.ParseContext) (ast.Exp
 
 		// Проверяем и потребляем закрывающую скобку
 		if !tokenStream.HasMore() || tokenStream.Current().Type != lexer.TokenRightParen {
-			return nil, fmt.Errorf("expected ')' after expression")
+			return nil, newErrorWithPos(tokenStream, "expected ')' after expression")
 		}
 		tokenStream.Consume() // потребуем ')'
 
 		return expr, nil
 
 	default:
-		return nil, fmt.Errorf("unsupported operand type for Elvis expression: %s", token.Type)
+		return nil, newErrorWithTokenPos(token, "unsupported operand type for Elvis expression: %s", token.Type)
 	}
 }
 
@@ -203,27 +200,27 @@ func (h *ElvisExpressionHandler) parseLanguageCall(ctx *common.ParseContext) (as
 
 	// Читаем язык
 	if !tokenStream.HasMore() || tokenStream.Current().Type != lexer.TokenIdentifier {
-		return nil, fmt.Errorf("expected language identifier")
+		return nil, newErrorWithPos(tokenStream, "expected language identifier")
 	}
 	languageToken := tokenStream.Consume()
 	language := languageToken.Value
 
 	// Проверяем и потребляем DOT
 	if !tokenStream.HasMore() || tokenStream.Current().Type != lexer.TokenDot {
-		return nil, fmt.Errorf("expected DOT after language '%s'", language)
+		return nil, newErrorWithPos(tokenStream, "expected DOT after language '%s'", language)
 	}
 	tokenStream.Consume()
 
 	// Читаем имя функции
 	if !tokenStream.HasMore() || tokenStream.Current().Type != lexer.TokenIdentifier {
-		return nil, fmt.Errorf("expected function name after DOT")
+		return nil, newErrorWithPos(tokenStream, "expected function name after DOT")
 	}
 	functionToken := tokenStream.Consume()
 	functionName := functionToken.Value
 
 	// Проверяем и потребляем открывающую скобку
 	if !tokenStream.HasMore() || tokenStream.Current().Type != lexer.TokenLeftParen {
-		return nil, fmt.Errorf("expected '(' after function name '%s'", functionName)
+		return nil, newErrorWithPos(tokenStream, "expected '(' after function name '%s'", functionName)
 	}
 	tokenStream.Consume()
 
@@ -231,27 +228,27 @@ func (h *ElvisExpressionHandler) parseLanguageCall(ctx *common.ParseContext) (as
 	arguments := make([]ast.Expression, 0)
 
 	if !tokenStream.HasMore() {
-		return nil, fmt.Errorf("unexpected EOF after '('")
+		return nil, newErrorWithPos(tokenStream, "unexpected EOF after '('")
 	}
 
 	if tokenStream.Current().Type != lexer.TokenRightParen {
 		// Есть хотя бы один аргумент
 		for {
 			if !tokenStream.HasMore() {
-				return nil, fmt.Errorf("unexpected EOF in arguments")
+				return nil, newErrorWithPos(tokenStream, "unexpected EOF in arguments")
 			}
 
 			// Читаем аргумент
 			arg, err := h.parseOperand(ctx)
 			if err != nil {
-				return nil, fmt.Errorf("failed to parse argument: %v", err)
+				return nil, newErrorWithPos(tokenStream, "failed to parse argument: %v", err)
 			}
 
 			arguments = append(arguments, arg)
 
 			// Проверяем разделитель или конец
 			if !tokenStream.HasMore() {
-				return nil, fmt.Errorf("unexpected EOF after argument")
+				return nil, newErrorWithPos(tokenStream, "unexpected EOF after argument")
 			}
 
 			nextToken := tokenStream.Current()
@@ -260,22 +257,22 @@ func (h *ElvisExpressionHandler) parseLanguageCall(ctx *common.ParseContext) (as
 				tokenStream.Consume() // Consuming comma
 				// После запятой должен быть аргумент
 				if !tokenStream.HasMore() {
-					return nil, fmt.Errorf("unexpected EOF after comma")
+					return nil, newErrorWithPos(tokenStream, "unexpected EOF after comma")
 				}
 				if tokenStream.Current().Type == lexer.TokenRightParen {
-					return nil, fmt.Errorf("unexpected ')' after comma")
+					return nil, newErrorWithPos(tokenStream, "unexpected ')' after comma")
 				}
 			} else if nextToken.Type == lexer.TokenRightParen {
 				break
 			} else {
-				return nil, fmt.Errorf("expected ',' or ')' after argument, got %s", nextToken.Type)
+				return nil, newErrorWithTokenPos(nextToken, "expected ',' or ')' after argument, got %s", nextToken.Type)
 			}
 		}
 	}
 
 	// Проверяем закрывающую скобку
 	if !tokenStream.HasMore() || tokenStream.Current().Type != lexer.TokenRightParen {
-		return nil, fmt.Errorf("expected ')' after arguments")
+		return nil, newErrorWithPos(tokenStream, "expected ')' after arguments")
 	}
 	tokenStream.Consume()
 
@@ -301,7 +298,7 @@ func (h *ElvisExpressionHandler) parseQualifiedVariable(ctx *common.ParseContext
 	// Потребляем первый идентификатор (язык)
 	firstToken := tokenStream.Consume()
 	if firstToken.Type != lexer.TokenIdentifier {
-		return nil, fmt.Errorf("expected identifier for qualified variable, got %s", firstToken.Type)
+		return nil, newErrorWithTokenPos(firstToken, "expected identifier for qualified variable, got %s", firstToken.Type)
 	}
 
 	language := firstToken.Value
@@ -315,7 +312,7 @@ func (h *ElvisExpressionHandler) parseQualifiedVariable(ctx *common.ParseContext
 
 		// Проверяем, что после точки идет идентификатор
 		if !tokenStream.HasMore() || tokenStream.Current().Type != lexer.TokenIdentifier {
-			return nil, fmt.Errorf("expected identifier after dot in qualified variable")
+			return nil, newErrorWithPos(tokenStream, "expected identifier after dot in qualified variable")
 		}
 
 		// Потребляем идентификатор
@@ -333,27 +330,27 @@ func (h *ElvisExpressionHandler) parseQualifiedVariable(ctx *common.ParseContext
 			arguments := make([]ast.Expression, 0)
 
 			if !tokenStream.HasMore() {
-				return nil, fmt.Errorf("unexpected EOF after '('")
+				return nil, newErrorWithPos(tokenStream, "unexpected EOF after '('")
 			}
 
 			if tokenStream.Current().Type != lexer.TokenRightParen {
 				// Есть хотя бы один аргумент
 				for {
 					if !tokenStream.HasMore() {
-						return nil, fmt.Errorf("unexpected EOF in arguments")
+						return nil, newErrorWithPos(tokenStream, "unexpected EOF in arguments")
 					}
 
 					// Читаем аргумент
 					arg, err := h.parseOperand(ctx)
 					if err != nil {
-						return nil, fmt.Errorf("failed to parse argument: %v", err)
+						return nil, newErrorWithPos(tokenStream, "failed to parse argument: %v", err)
 					}
 
 					arguments = append(arguments, arg)
 
 					// Проверяем разделитель или конец
 					if !tokenStream.HasMore() {
-						return nil, fmt.Errorf("unexpected EOF after argument")
+						return nil, newErrorWithPos(tokenStream, "unexpected EOF after argument")
 					}
 
 					nextToken := tokenStream.Current()
@@ -362,22 +359,22 @@ func (h *ElvisExpressionHandler) parseQualifiedVariable(ctx *common.ParseContext
 						tokenStream.Consume() // Consuming comma
 						// После запятой должен быть аргумент
 						if !tokenStream.HasMore() {
-							return nil, fmt.Errorf("unexpected EOF after comma")
+							return nil, newErrorWithPos(tokenStream, "unexpected EOF after comma")
 						}
 						if tokenStream.Current().Type == lexer.TokenRightParen {
-							return nil, fmt.Errorf("unexpected ')' after comma")
+							return nil, newErrorWithPos(tokenStream, "unexpected ')' after comma")
 						}
 					} else if nextToken.Type == lexer.TokenRightParen {
 						break
 					} else {
-						return nil, fmt.Errorf("expected ',' or ')' after argument, got %s", nextToken.Type)
+						return nil, newErrorWithTokenPos(nextToken, "expected ',' or ')' after argument, got %s", nextToken.Type)
 					}
 				}
 			}
 
 			// Проверяем закрывающую скобку
 			if !tokenStream.HasMore() || tokenStream.Current().Type != lexer.TokenRightParen {
-				return nil, fmt.Errorf("expected ')' after arguments")
+				return nil, newErrorWithPos(tokenStream, "expected ')' after arguments")
 			}
 			tokenStream.Consume()
 

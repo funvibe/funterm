@@ -1,8 +1,6 @@
 package handler
 
 import (
-	"fmt"
-
 	"go-parser/pkg/common"
 	"go-parser/pkg/config"
 	"go-parser/pkg/lexer"
@@ -42,7 +40,7 @@ func (h *FunctionHandler) CanHandle(token lexer.Token) bool {
 // Handle - обрабатывает функцию
 func (h *FunctionHandler) Handle(ctx *common.ParseContext) (interface{}, error) {
 	// В будущем здесь будет обработка определения и вызова функций
-	return nil, fmt.Errorf("function handler not implemented yet")
+	return nil, newErrorWithPos(nil, "function handler not implemented yet")
 }
 
 // Config - возвращает конфигурацию обработчика

@@ -72,6 +72,8 @@ func NewPythonRuntime() *PythonRuntime {
 
 // SetVerbose sets the verbose mode for the Python runtime
 func (pr *PythonRuntime) SetVerbose(verbose bool) {
+	pr.mutex.Lock()
+	defer pr.mutex.Unlock()
 	pr.verbose = verbose
 }
 

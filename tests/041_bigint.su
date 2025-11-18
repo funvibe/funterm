@@ -1,0 +1,8 @@
+big = 1000000000000000000
+data = <<1:8>>
+match data {
+    <<result:(big / 1000000000000000000)/binary>> -> {
+        lua.print("Bigint result: OK")
+    },
+    _ -> lua.print("No match")
+}

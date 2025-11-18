@@ -1,0 +1,8 @@
+# Test complex expressions with array indexing and logical operators
+data = [10, 20, 30]
+
+if data[0] > 5 && data[1] < 25 {
+    print("Complex condition met")
+} else {
+    print("Complex condition not met")
+}

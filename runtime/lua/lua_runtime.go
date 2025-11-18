@@ -13,6 +13,11 @@ import (
 	lua "github.com/yuin/gopher-lua"
 )
 
+// LuaFunctionWrapper wraps a Lua function to preserve it when converting to Go
+type LuaFunctionWrapper struct {
+	Function lua.LValue
+}
+
 // LuaRuntime implements the LanguageRuntime interface for Lua
 type LuaRuntime struct {
 	state *lua.LState
@@ -220,7 +225,11 @@ func parseLuaTableToBitstringExpression(table *lua.LTable) *ast.BitstringExpress
 			// Parse size
 			if size := segmentTable.RawGetString("size"); size.Type() == lua.LTNumber {
 				sizeValue := float64(size.(lua.LNumber))
-				segment.Size = &ast.NumberLiteral{Value: sizeValue}
+				segment.Size = &ast.NumberLiteral{
+					FloatValue: sizeValue,
+					IsInt:      false,
+					Pos:        ast.Position{},
+				}
 			}
 
 			// Parse specifiers
@@ -270,9 +279,17 @@ func (lr *LuaRuntime) registerGoFunctions() {
 		}
 
 		// Convert arguments to strings using centralized formatter
+		// Skip nil values to prevent outputting "<nil>"
 		var strArgs []string
 		for _, arg := range args {
-			strArgs = append(strArgs, shared.FormatValueForDisplay(arg))
+			if arg != nil {
+				strArgs = append(strArgs, shared.FormatValueForDisplay(arg))
+			}
+		}
+
+		// Only output if we have non-nil arguments
+		if len(strArgs) == 0 {
+			return 0 // No return values, no output
 		}
 
 		// Join with spaces and print to output capture
@@ -453,6 +470,17 @@ func (lr *LuaRuntime) IsReady() bool {
 	return lr.ready && lr.state != nil
 }
 
+// GetVariableFromRuntimeObject получает переменную из runtimeObjects
+func (lr *LuaRuntime) GetVariableFromRuntimeObject(name string) (interface{}, error) {
+	lr.mu.Lock()
+	defer lr.mu.Unlock()
+
+	if value, exists := lr.runtimeObjects[name]; exists {
+		return value, nil
+	}
+	return nil, fmt.Errorf("variable '%s' not found in runtime objects", name)
+}
+
 // GoToLua converts a Go value to a Lua value
 func (lr *LuaRuntime) GoToLua(value interface{}) (lua.LValue, error) {
 	switch v := value.(type) {
@@ -513,7 +541,7 @@ func (lr *LuaRuntime) GoToLua(value interface{}) (lua.LValue, error) {
 		// Create a Lua userdata object for bitstring
 		userData := lr.state.NewUserData()
 		userData.Value = v
-		// Add metatable for __tostring to return ToFunbitFormat
+		// Add metatable for __tostring to return ToFunbitFormat and bytes method
 		metaTable := lr.state.NewTable()
 		metaTable.RawSetString("__tostring", lr.state.NewFunction(func(L *lua.LState) int {
 			userData := L.CheckUserData(1)
@@ -524,13 +552,25 @@ func (lr *LuaRuntime) GoToLua(value interface{}) (lua.LValue, error) {
 			L.Push(lua.LString("<<>>"))
 			return 1
 		}))
+		// Add bytes method to get byte representation
+		metaTable.RawSetString("bytes", lr.state.NewFunction(func(L *lua.LState) int {
+			userData := L.CheckUserData(1)
+			if bs, ok := userData.Value.(*shared.BitstringObject); ok {
+				bytes := bs.BitString.ToBytes()
+				// Convert []byte to Lua string (which can be used as bytes)
+				L.Push(lua.LString(string(bytes)))
+				return 1
+			}
+			L.Push(lua.LNil)
+			return 1
+		}))
 		userData.Metatable = metaTable
 		return userData, nil
 	case *funbit.BitString:
 		// Create a Lua userdata object for funbit.BitString (from rest patterns)
 		userData := lr.state.NewUserData()
 		userData.Value = v
-		// Add metatable for __tostring to return ToFunbitFormat
+		// Add metatable for __tostring to return ToFunbitFormat and bytes method
 		metaTable := lr.state.NewTable()
 		metaTable.RawSetString("__tostring", lr.state.NewFunction(func(L *lua.LState) int {
 			userData := L.CheckUserData(1)
@@ -539,6 +579,18 @@ func (lr *LuaRuntime) GoToLua(value interface{}) (lua.LValue, error) {
 				return 1
 			}
 			L.Push(lua.LString("<<>>"))
+			return 1
+		}))
+		// Add bytes method to get byte representation
+		metaTable.RawSetString("bytes", lr.state.NewFunction(func(L *lua.LState) int {
+			userData := L.CheckUserData(1)
+			if bs, ok := userData.Value.(*funbit.BitString); ok {
+				bytes := bs.ToBytes()
+				// Convert []byte to Lua string (which can be used as bytes)
+				L.Push(lua.LString(string(bytes)))
+				return 1
+			}
+			L.Push(lua.LNil)
 			return 1
 		}))
 		userData.Metatable = metaTable
@@ -567,6 +619,9 @@ func (lr *LuaRuntime) GoToLua(value interface{}) (lua.LValue, error) {
 		}))
 		userData.Metatable = metaTable
 		return userData, nil
+	case *LuaFunctionWrapper:
+		// Return the original Lua function
+		return v.Function, nil
 	default:
 		return nil, fmt.Errorf("unsupported Go type: %T", value)
 	}
@@ -643,9 +698,7 @@ func (lr *LuaRuntime) luaToGoWithVisited(value lua.LValue, visited map[uintptr]b
 			result = make([]interface{}, maxIndex)
 			for i := 1; i <= maxIndex; i++ {
 				val := table.RawGetInt(i)
-				if val.Type() != lua.LTNil {
-					result.([]interface{})[i-1] = lr.luaToGoWithVisited(val, visited)
-				}
+				result.([]interface{})[i-1] = lr.luaToGoWithVisited(val, visited)
 			}
 		} else {
 			// Convert to map
@@ -676,7 +729,9 @@ func (lr *LuaRuntime) luaToGoWithVisited(value lua.LValue, visited map[uintptr]b
 
 		return result
 	case lua.LTFunction:
-		return fmt.Sprintf("<function: %p>", value)
+		// For functions, we need to preserve the actual Lua function object
+		// Store it as a special wrapper that can be converted back
+		return &LuaFunctionWrapper{Function: value}
 	default:
 		return fmt.Sprintf("<%s: %v>", value.Type().String(), value)
 	}

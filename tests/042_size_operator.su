@@ -1,0 +1,5 @@
+str_var = <<"Привет">>
+bs_var = <<"hello"/binary>>
+
+lua.print(@str_var)
+lua.print(@bs_var)

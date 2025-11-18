@@ -489,7 +489,7 @@ print(formatted)
 `
 
 	// Создаем временный файл с Python скриптом
-	tmpFile := "/tmp/suterm_format_code.py"
+	tmpFile := "/tmp/funterm_format_code.py"
 	file, err := os.Create(tmpFile)
 	if err != nil {
 		return code, fmt.Errorf("failed to create temp file: %w", err)

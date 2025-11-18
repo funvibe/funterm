@@ -18,17 +18,16 @@ const (
 	TokenComma      // COMMA
 	TokenSemicolon  // SEMICOLON
 	// Новые токены для Этапа 2
-	TokenLBracket // [
-	TokenRBracket // ]
-	TokenLBrace   // {
-	TokenRBrace   // }
-	TokenAssign   // =
-	TokenColon    // :
+	TokenLBracket    // [
+	TokenRBracket    // ]
+	TokenLBrace      // {
+	TokenRBrace      // }
+	TokenAssign      // =
+	TokenColonEquals // :=
+	TokenColon       // :
 	// Новые токены для Этапа 3 - циклы
 	TokenFor      // for
 	TokenIn       // in
-	TokenDo       // do
-	TokenEnd      // end
 	TokenWhile    // while
 	TokenBreak    // break
 	TokenContinue // continue
@@ -41,8 +40,10 @@ const (
 	TokenDoubleRightAngle // >>
 	TokenSlash            // /
 	// Новые токены для pipes и background tasks
-	TokenPipe      // |
+	TokenPipe      // |>
+	TokenBitwiseOr // |
 	TokenAmpersand // &
+	TokenCaret     // ^
 	// Новые токены для операторов сравнения
 	TokenLess         // <
 	TokenGreater      // >
@@ -59,6 +60,7 @@ const (
 	TokenMultiply // *
 	TokenModulo   // %
 	TokenConcat   // ++
+	TokenPower    // **
 	// Новые токены для логических операторов
 	TokenAnd   // &&
 	TokenOr    // ||
@@ -67,6 +69,7 @@ const (
 	// Новые токены для булевых литералов
 	TokenTrue  // true
 	TokenFalse // false
+	TokenNil   // nil
 	// Новые токены для Elvis оператора
 	TokenQuestion // ?
 	// Новые токены для зарезервированных ключевых слов (Task 25)
@@ -124,16 +127,14 @@ func (t TokenType) String() string {
 		return "RBRACE"
 	case TokenAssign:
 		return "ASSIGN"
+	case TokenColonEquals:
+		return "COLON_EQUALS"
 	case TokenColon:
 		return "COLON"
 	case TokenFor:
 		return "FOR"
 	case TokenIn:
 		return "IN"
-	case TokenDo:
-		return "DO"
-	case TokenEnd:
-		return "END"
 	case TokenWhile:
 		return "WHILE"
 	case TokenBreak:
@@ -154,8 +155,12 @@ func (t TokenType) String() string {
 		return "SLASH"
 	case TokenPipe:
 		return "PIPE"
+	case TokenBitwiseOr:
+		return "BITWISE_OR"
 	case TokenAmpersand:
 		return "AMPERSAND"
+	case TokenCaret:
+		return "CARET"
 	case TokenLess:
 		return "LESS"
 	case TokenGreater:
@@ -182,6 +187,8 @@ func (t TokenType) String() string {
 		return "MODULO"
 	case TokenConcat:
 		return "CONCAT"
+	case TokenPower:
+		return "POWER"
 	case TokenAnd:
 		return "AND"
 	case TokenOr:
@@ -194,6 +201,8 @@ func (t TokenType) String() string {
 		return "TRUE"
 	case TokenFalse:
 		return "FALSE"
+	case TokenNil:
+		return "NIL"
 	case TokenQuestion:
 		return "QUESTION"
 	case TokenLua:
@@ -270,5 +279,10 @@ func (t Token) LanguageTokenToString() string {
 
 // IsLanguageIdentifierOrCallToken проверяет, является ли токен идентификатором или токеном языка
 func (t Token) IsLanguageIdentifierOrCallToken() bool {
-	return t.Type == TokenIdentifier || t.IsLanguageToken()
+	result := t.Type == TokenIdentifier || t.IsLanguageToken()
+	// Debug: print result for TokenFor
+	if t.Type == TokenFor {
+		fmt.Printf("DEBUG: IsLanguageIdentifierOrCallToken for TokenFor: %v (TokenIdentifier: %v, IsLanguageToken: %v)\n", result, t.Type == TokenIdentifier, t.IsLanguageToken())
+	}
+	return result
 }

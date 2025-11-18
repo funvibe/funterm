@@ -1,8 +1,6 @@
 package handler
 
 import (
-	"fmt"
-
 	"go-parser/pkg/ast"
 	"go-parser/pkg/common"
 	"go-parser/pkg/lexer"
@@ -39,7 +37,7 @@ func (h *ArrayHandler) Handle(ctx *common.ParseContext) (interface{}, error) {
 	// Потребляем открывающую скобку
 	openBracket := ctx.TokenStream.Consume()
 	if openBracket.Type != lexer.TokenLBracket {
-		return nil, fmt.Errorf("expected '[', got %s", openBracket.Type)
+		return nil, newErrorWithTokenPos(openBracket, "expected '[', got %s", openBracket.Type)
 	}
 
 	// Создаем узел массива
@@ -81,7 +79,7 @@ func (h *ArrayHandler) Handle(ctx *common.ParseContext) (interface{}, error) {
 
 		element, err := assignmentHandler.parseComplexExpression(assignmentCtx)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse array element: %v", err)
+			return nil, newErrorWithPos(ctx.TokenStream, "failed to parse array element: %v", err)
 		}
 
 		if element != nil {
@@ -90,7 +88,7 @@ func (h *ArrayHandler) Handle(ctx *common.ParseContext) (interface{}, error) {
 	}
 
 	// Если дошли сюда, значит не нашли закрывающую скобку
-	return nil, fmt.Errorf("unclosed array")
+	return nil, newErrorWithPos(ctx.TokenStream, "unclosed array")
 }
 
 // Config возвращает конфигурацию обработчика

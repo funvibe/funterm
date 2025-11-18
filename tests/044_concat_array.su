@@ -1,0 +1,14 @@
+ary1 = [1, 2]
+ary2 = [3, 4]
+ary3 = concat(ary1, ary2)
+lua.print(ary3)
+
+ary4 = ["a", "b"]
+lua.print(concat(ary1, ary4))
+
+ary5 = ary4
+ary5[0] = "c"
+ary5[1] = "d"
+lua.print(concat(ary4, ary5))
+lua.print(concat(ary1, ary2, ary5))
+lua.print(concat(ary1, ary2, ary4, ary5))

@@ -15,6 +15,7 @@ type TokenStream interface {
 	SetPosition(pos int)
 	HasMore() bool
 	Clone() TokenStream
+	GetLexer() lexer.Lexer
 }
 
 type SimpleTokenStream struct {
@@ -45,8 +46,8 @@ func NewTokenStream(l lexer.Lexer) *SimpleTokenStream {
 		s.current = s.tokens[0]
 	}
 
-	// Лексер больше не нужен, так как все токены буферизованы
-	s.lexer = nil
+	// Сохраняем лексер для доступа к методам управления состоянием
+	// s.lexer = nil
 
 	return s
 }
@@ -159,4 +160,8 @@ func (s *SimpleTokenStream) Clone() TokenStream {
 	}
 
 	return clone
+}
+
+func (s *SimpleTokenStream) GetLexer() lexer.Lexer {
+	return s.lexer
 }

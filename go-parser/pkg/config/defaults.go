@@ -89,27 +89,6 @@ func GetDefaultHandlerConfigs() []ConstructHandlerConfig {
 			},
 		},
 
-		// Кортежи (отключены, пока не реализованы соответствующие обработчики)
-		{
-			ConstructType:    common.ConstructTuple,
-			Name:             "tuple-constructor",
-			Priority:         70,
-			Order:            1,
-			IsEnabled:        false, // Отключено, пока не реализован отдельный обработчик
-			IsFallback:       false,
-			FallbackPriority: 0,
-			TokenPatterns: []TokenPattern{
-				{
-					TokenType: lexer.TokenLeftParen,
-					Offset:    0,
-				},
-			},
-			CustomParams: map[string]interface{}{
-				"maxElements": 100,
-				"allowEmpty":  true,
-			},
-		},
-
 		// Функции (отключены, пока не реализован лексер для ключевых слов)
 		{
 			ConstructType:    common.ConstructFunction,

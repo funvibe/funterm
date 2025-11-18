@@ -3,6 +3,7 @@ package logging
 import (
 	"context"
 	"fmt"
+	"funterm/errors"
 	"os"
 	"runtime"
 	"time"
@@ -74,6 +75,15 @@ type Logger interface {
 
 	// Error logs an error message
 	Error(msg string, fields ...LogField)
+
+	// ErrorWithPosition logs an error message with position information
+	ErrorWithPosition(msg string, line, column int, fields ...LogField)
+
+	// ErrorWithASTPosition logs an error message with AST position information
+	ErrorWithASTPosition(msg string, file string, line, column int, fields ...LogField)
+
+	// ErrorExecution logs an execution error with position information
+	ErrorExecution(err error, fields ...LogField)
 
 	// Fatal logs a fatal message and exits the program
 	Fatal(msg string, fields ...LogField)
@@ -235,6 +245,41 @@ func (l *DefaultLogger) Warn(msg string, fields ...LogField) {
 // Error logs an error message
 func (l *DefaultLogger) Error(msg string, fields ...LogField) {
 	l.log(LevelError, msg, fields...)
+}
+
+// ErrorWithPosition logs an error message with position information
+func (l *DefaultLogger) ErrorWithPosition(msg string, line, column int, fields ...LogField) {
+	posFields := append(fields, LogField{Key: "line", Value: line}, LogField{Key: "column", Value: column})
+	l.log(LevelError, msg, posFields...)
+}
+
+// ErrorWithASTPosition logs an error message with AST position information
+func (l *DefaultLogger) ErrorWithASTPosition(msg string, file string, line, column int, fields ...LogField) {
+	posFields := append(fields,
+		LogField{Key: "file", Value: file},
+		LogField{Key: "line", Value: line},
+		LogField{Key: "column", Value: column})
+	l.log(LevelError, msg, posFields...)
+}
+
+// ErrorExecution logs an execution error with position information
+func (l *DefaultLogger) ErrorExecution(err error, fields ...LogField) {
+	// Try to extract position information from the error if it's an ExecutionError
+	if execErr, ok := err.(*errors.ExecutionError); ok {
+		posFields := append(fields,
+			LogField{Key: "error_code", Value: execErr.Code},
+			LogField{Key: "error_type", Value: string(execErr.Type)},
+			LogField{Key: "line", Value: execErr.Line},
+			LogField{Key: "column", Value: execErr.Col})
+		if execErr.Language != "" {
+			posFields = append(posFields, LogField{Key: "language", Value: execErr.Language})
+		}
+		l.log(LevelError, execErr.Message, posFields...)
+	} else {
+		// For other error types, just log the error
+		errorFields := append(fields, LogField{Key: "error", Value: err.Error()})
+		l.log(LevelError, err.Error(), errorFields...)
+	}
 }
 
 // Fatal logs a fatal message and exits the program

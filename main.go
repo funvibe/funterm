@@ -501,7 +501,7 @@ func runDiagnostics(configPath string, verbose bool) error {
 		fmt.Println("Running system diagnostics...")
 	}
 
-	fmt.Println("=== Suterm System Diagnostics ===")
+	fmt.Println("=== Funterm System Diagnostics ===")
 	fmt.Println()
 
 	// Check Python runtime

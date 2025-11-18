@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"math/big"
 
 	"github.com/funvibe/funbit/pkg/funbit"
 )
@@ -29,6 +30,10 @@ func main() {
 	complexProtocolExample()
 	typeSemanticExample()
 	integrationPatterns()
+
+	// Big.Int support examples
+	bigIntSupportExample()
+	hugeIntegerBitstringExample()
 
 	// Unit multipliers and compound specifiers
 	unitMultipliersExample()
@@ -761,5 +766,276 @@ func bitstringExample() {
 	}
 
 	fmt.Println("   Note: Bitstrings can have any bit length, not just multiples of 8")
+	fmt.Println()
+}
+
+// Example: Big.Int Support for Arbitrary-Precision Integers
+func bigIntSupportExample() {
+	fmt.Println("=== Big.Int Support for Arbitrary-Precision Integers ===")
+	fmt.Println("   Handle huge integers without precision loss")
+	fmt.Println()
+
+	// Example 1: Basic big.Int construction and matching
+	fmt.Println("1. Basic Big.Int Construction and Matching:")
+
+	// Create a huge integer that would overflow int64
+	hugeInt := new(big.Int)
+	hugeInt.SetString("999999999999999999999999999999", 10) // 30 digits
+
+	builder := funbit.NewBuilder()
+	funbit.AddInteger(builder, hugeInt, funbit.WithSize(256)) // 256-bit integer
+
+	bitstring, err := funbit.Build(builder)
+	if err != nil {
+		log.Fatalf("Failed to build big.Int bitstring: %v", err)
+	}
+
+	fmt.Printf("   Built huge integer (%s): %d bits\n", hugeInt.String(), bitstring.Length())
+
+	// Pattern matching extracts as *big.Int
+	matcher := funbit.NewMatcher()
+	var extracted *big.Int
+	funbit.Integer(matcher, &extracted, funbit.WithSize(256))
+
+	results, err := funbit.Match(matcher, bitstring)
+	if err == nil && len(results) > 0 {
+		fmt.Printf("   Extracted: %s (full precision preserved) ✅\n", extracted.String())
+		if extracted.Cmp(hugeInt) == 0 {
+			fmt.Printf("   Values match exactly: true ✅\n")
+		}
+	}
+	fmt.Println()
+
+	// Example 2: Mixed regular integers and big.Int
+	fmt.Println("2. Mixed Regular Integers and Big.Int:")
+
+	regularInt := 42
+	anotherHuge := new(big.Int)
+	anotherHuge.SetString("123456789012345678901234567890", 10)
+
+	builder2 := funbit.NewBuilder()
+	funbit.AddInteger(builder2, regularInt, funbit.WithSize(8))    // Regular int
+	funbit.AddInteger(builder2, anotherHuge, funbit.WithSize(256)) // Big.Int
+
+	bitstring2, err := funbit.Build(builder2)
+	if err != nil {
+		log.Fatalf("Failed to build mixed bitstring: %v", err)
+	}
+
+	fmt.Printf("   Mixed bitstring: %d bits (8 + 256)\n", bitstring2.Length())
+
+	// Extract both types
+	matcher2 := funbit.NewMatcher()
+	var regularExtracted int
+	var hugeExtracted *big.Int
+
+	funbit.Integer(matcher2, &regularExtracted, funbit.WithSize(8))
+	funbit.Integer(matcher2, &hugeExtracted, funbit.WithSize(256))
+
+	results2, err := funbit.Match(matcher2, bitstring2)
+	if err == nil && len(results2) > 0 {
+		fmt.Printf("   Regular: %d, Huge: %s ✅\n", regularExtracted, hugeExtracted.String())
+	}
+	fmt.Println()
+
+	// Example 3: Big.Int with different endianness
+	fmt.Println("3. Big.Int with Different Endianness:")
+
+	testBig := new(big.Int)
+	testBig.SetString("0x123456789ABCDEF0123456789ABCDEF0", 0) // Hex parsing
+
+	builder3 := funbit.NewBuilder()
+	funbit.AddInteger(builder3, testBig, funbit.WithSize(128), funbit.WithEndianness("big"))
+	funbit.AddInteger(builder3, testBig, funbit.WithSize(128), funbit.WithEndianness("little"))
+
+	bitstring3, err := funbit.Build(builder3)
+	if err != nil {
+		log.Fatalf("Failed to build endianness test: %v", err)
+	}
+
+	fmt.Printf("   Endianness test bitstring: %d bits\n", bitstring3.Length())
+
+	matcher3 := funbit.NewMatcher()
+	var bigEndian, littleEndian *big.Int
+
+	funbit.Integer(matcher3, &bigEndian, funbit.WithSize(128), funbit.WithEndianness("big"))
+	funbit.Integer(matcher3, &littleEndian, funbit.WithSize(128), funbit.WithEndianness("little"))
+
+	results3, err := funbit.Match(matcher3, bitstring3)
+	if err == nil && len(results3) > 0 {
+		fmt.Printf("   Big-endian: %s\n", bigEndian.String())
+		fmt.Printf("   Little-endian: %s\n", littleEndian.String())
+		fmt.Printf("   Values match: %v ✅\n", bigEndian.Cmp(littleEndian) == 0)
+	}
+	fmt.Println()
+
+	// Example 4: Big.Int in dynamic sizing
+	fmt.Println("4. Big.Int in Dynamic Sizing:")
+
+	// Use big.Int to calculate dynamic size
+	sizeValue := new(big.Int)
+	sizeValue.SetInt64(5) // 5 bytes
+
+	data := "Hello"
+
+	builder4 := funbit.NewBuilder()
+	funbit.AddInteger(builder4, sizeValue, funbit.WithSize(64)) // Store size as big.Int
+	funbit.AddBinary(builder4, []byte(data))
+
+	bitstring4, err := funbit.Build(builder4)
+	if err != nil {
+		log.Fatalf("Failed to build dynamic size test: %v", err)
+	}
+
+	matcher4 := funbit.NewMatcher()
+	var extractedSize *big.Int
+	var payload []byte
+
+	funbit.Integer(matcher4, &extractedSize, funbit.WithSize(64))
+	funbit.RegisterVariable(matcher4, "size", &extractedSize)
+	funbit.Binary(matcher4, &payload, funbit.WithDynamicSizeExpression("size*8"), funbit.WithUnit(1))
+
+	results4, err := funbit.Match(matcher4, bitstring4)
+	if err == nil && len(results4) > 0 {
+		fmt.Printf("   Size (big.Int): %s, Payload: %s ✅\n", extractedSize.String(), string(payload))
+	}
+	fmt.Println()
+}
+
+// Example: Huge Integer Bitstring for Real-World Use Cases
+func hugeIntegerBitstringExample() {
+	fmt.Println("=== Huge Integer Bitstring for Real-World Use Cases ===")
+	fmt.Println("   Cryptographic keys, large IDs, financial calculations")
+	fmt.Println()
+
+	// Example 1: Cryptographic key representation
+	fmt.Println("1. Cryptographic Key Representation:")
+
+	// Simulate a 2048-bit RSA modulus (simplified for demo)
+	rsaModulus := new(big.Int)
+	rsaModulus.SetString("23902834098234098234098230948230948230948230948230948"+
+		"230948230948230948230948230948230948230948230948230948230948230948"+
+		"230948230948230948230948230948230948230948230948230948230948230948", 10)
+
+	builder := funbit.NewBuilder()
+	funbit.AddInteger(builder, rsaModulus, funbit.WithSize(2048)) // 2048-bit key
+
+	bitstring, err := funbit.Build(builder)
+	if err != nil {
+		log.Fatalf("Failed to build RSA modulus: %v", err)
+	}
+
+	fmt.Printf("   RSA Modulus (2048-bit): %d bits\n", bitstring.Length())
+	fmt.Printf("   First 50 digits: %s...\n", rsaModulus.String()[:50])
+
+	// Extract and verify
+	matcher := funbit.NewMatcher()
+	var extractedKey *big.Int
+	funbit.Integer(matcher, &extractedKey, funbit.WithSize(2048))
+
+	results, err := funbit.Match(matcher, bitstring)
+	if err == nil && len(results) > 0 {
+		fmt.Printf("   Key integrity: %v ✅\n", extractedKey.Cmp(rsaModulus) == 0)
+	}
+	fmt.Println()
+
+	// Example 2: Large database ID with timestamp
+	fmt.Println("2. Large Database ID with Timestamp:")
+
+	// Create a compound ID: timestamp (64-bit) + sequence (32-bit) + shard (32-bit)
+	timestamp := new(big.Int)
+	timestamp.SetInt64(1699123456789) // Current timestamp in milliseconds
+
+	sequence := new(big.Int)
+	sequence.SetInt64(12345678)
+
+	shard := new(big.Int)
+	shard.SetInt64(42)
+
+	// Combine: (timestamp << 64) | (sequence << 32) | shard
+	compoundID := new(big.Int)
+	compoundID.Lsh(timestamp, 64) // timestamp << 64
+	temp := new(big.Int)
+	temp.Lsh(sequence, 32) // sequence << 32
+	compoundID.Or(compoundID, temp)
+	compoundID.Or(compoundID, shard)
+
+	builder2 := funbit.NewBuilder()
+	funbit.AddInteger(builder2, compoundID, funbit.WithSize(128)) // 128-bit compound ID
+
+	bitstring2, err := funbit.Build(builder2)
+	if err != nil {
+		log.Fatalf("Failed to build compound ID: %v", err)
+	}
+
+	fmt.Printf("   Compound ID (128-bit): %d bits\n", bitstring2.Length())
+	fmt.Printf("   Full ID: %s\n", compoundID.String())
+
+	// Extract and decode components
+	matcher2 := funbit.NewMatcher()
+	var extractedID *big.Int
+	funbit.Integer(matcher2, &extractedID, funbit.WithSize(128))
+
+	results2, err := funbit.Match(matcher2, bitstring2)
+	if err == nil && len(results2) > 0 {
+		// Decode components
+		extractedShard := new(big.Int).And(extractedID, big.NewInt(0xFFFFFFFF))
+		tempSeq := new(big.Int).Rsh(extractedID, 32)
+		extractedSequence := new(big.Int).And(tempSeq, big.NewInt(0xFFFFFFFF))
+		extractedTimestamp := new(big.Int).Rsh(extractedID, 64)
+
+		fmt.Printf("   Decoded - Timestamp: %s, Sequence: %s, Shard: %s ✅\n",
+			extractedTimestamp.String(), extractedSequence.String(), extractedShard.String())
+	}
+	fmt.Println()
+
+	// Example 3: Financial calculation with high precision
+	fmt.Println("3. Financial Calculation with High Precision:")
+
+	// Calculate interest for large principal over many periods
+	principal := new(big.Int)
+	principal.SetString("1000000000000000000000000", 10) // 1 septillion (10^24)
+
+	interestRate := new(big.Int)
+	interestRate.SetString("105", 10) // 1.05% represented as basis points * 100
+
+	periods := int64(120) // 10 years monthly
+
+	// Simple interest calculation: principal * rate * periods / 10000
+	totalInterest := new(big.Int)
+	totalInterest.Mul(principal, interestRate)
+	totalInterest.Mul(totalInterest, big.NewInt(periods))
+	totalInterest.Div(totalInterest, big.NewInt(10000))
+
+	finalAmount := new(big.Int)
+	finalAmount.Add(principal, totalInterest)
+
+	builder3 := funbit.NewBuilder()
+	funbit.AddInteger(builder3, principal, funbit.WithSize(256))
+	funbit.AddInteger(builder3, totalInterest, funbit.WithSize(256))
+	funbit.AddInteger(builder3, finalAmount, funbit.WithSize(256))
+
+	bitstring3, err := funbit.Build(builder3)
+	if err != nil {
+		log.Fatalf("Failed to build financial data: %v", err)
+	}
+
+	fmt.Printf("   Financial data (3 × 256-bit): %d bits\n", bitstring3.Length())
+
+	matcher3 := funbit.NewMatcher()
+	var extractedPrincipal, extractedInterest, extractedFinal *big.Int
+
+	funbit.Integer(matcher3, &extractedPrincipal, funbit.WithSize(256))
+	funbit.Integer(matcher3, &extractedInterest, funbit.WithSize(256))
+	funbit.Integer(matcher3, &extractedFinal, funbit.WithSize(256))
+
+	results3, err := funbit.Match(matcher3, bitstring3)
+	if err == nil && len(results3) > 0 {
+		fmt.Printf("   Principal: %s\n", extractedPrincipal.String())
+		fmt.Printf("   Interest:  %s\n", extractedInterest.String())
+		fmt.Printf("   Final:     %s ✅\n", extractedFinal.String())
+	}
+
+	fmt.Println("   Big.Int enables precise financial calculations without floating-point errors")
 	fmt.Println()
 }

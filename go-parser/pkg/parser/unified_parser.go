@@ -2,9 +2,11 @@ package parser
 
 import (
 	"fmt"
+	"strings"
 	"go-parser/pkg/ast"
 	"go-parser/pkg/common"
 	"go-parser/pkg/config"
+	exprparser "go-parser/pkg/expression"
 	"go-parser/pkg/handler"
 	"go-parser/pkg/lexer"
 	"go-parser/pkg/stream"
@@ -120,11 +122,11 @@ func NewUnifiedParserWithVerbose(verbose bool) *UnifiedParser {
 	registry.RegisterConstructHandler(codeBlockHandler, codeBlockConfig)
 
 	// Регистрируем Pipe обработчик для pipe expressions
-	// PipeHandler будет обрабатывать токены языков и идентификаторы с высоким приоритетом для проверки |
+	// PipeHandler должен иметь высокий приоритет для обработки pipe expressions
 	pipeConfig := config.ConstructHandlerConfig{
 		ConstructType: common.ConstructPipe,
 		Name:          "pipe-expression",
-		Priority:      95, // Высокий приоритет для проверки pipe expressions
+		Priority:      121, // Приоритет выше чем ParenthesizedExpressionHandler (120) для обработки скобок с pipe внутри
 		Order:         1,
 		IsEnabled:     true,
 		IsFallback:    false,
@@ -136,6 +138,9 @@ func NewUnifiedParserWithVerbose(verbose bool) *UnifiedParser {
 			{TokenType: lexer.TokenGo, Offset: 0},
 			{TokenType: lexer.TokenNode, Offset: 0},
 			{TokenType: lexer.TokenJS, Offset: 0},
+			{TokenType: lexer.TokenLeftParen, Offset: 0}, // Обрабатываем скобки (если есть | внутри)
+			{TokenType: lexer.TokenPipe, Offset: 0},      // Обрабатываем операторы |
+			{TokenType: lexer.TokenBitwiseOr, Offset: 0}, // Обрабатываем операторы |
 		},
 	}
 
@@ -164,11 +169,27 @@ func NewUnifiedParserWithVerbose(verbose bool) *UnifiedParser {
 	languageCallHandler := handler.NewLanguageCallHandlerWithVerbose(languageCallConfig, verbose)
 	registry.RegisterConstructHandler(languageCallHandler, languageCallConfig)
 
+	// Регистрируем BuiltinFunction обработчик для вызовов builtin функций
+	builtinFunctionConfig := config.ConstructHandlerConfig{
+		ConstructType: common.ConstructFunction,
+		Name:          "builtin-function-call",
+		Priority:      120, // Самый высокий приоритет для builtin функций
+		Order:         1,
+		IsEnabled:     true,
+		IsFallback:    false,
+		TokenPatterns: []config.TokenPattern{
+			{TokenType: lexer.TokenIdentifier, Offset: 0},
+		},
+	}
+
+	builtinFunctionHandler := handler.NewBuiltinFunctionHandlerWithVerbose(builtinFunctionConfig, verbose)
+	registry.RegisterConstructHandler(builtinFunctionHandler, builtinFunctionConfig)
+
 	// Регистрируем QualifiedVariable обработчик (низкий приоритет для простых переменных)
 	qualifiedVarConfig := config.ConstructHandlerConfig{
 		ConstructType: common.ConstructVariable,
 		Name:          "qualified-variable",
-		Priority:      10, // Низкий приоритет
+		Priority:      15, // Выше чем VariableReadHandler
 		Order:         4,
 		IsEnabled:     true,
 		IsFallback:    false,
@@ -186,12 +207,28 @@ func NewUnifiedParserWithVerbose(verbose bool) *UnifiedParser {
 	qualifiedVarHandler := handler.NewQualifiedVariableHandler(qualifiedVarConfig)
 	registry.RegisterConstructHandler(qualifiedVarHandler, qualifiedVarConfig)
 
-	// Регистрируем NumericForLoop обработчик для Lua циклов (более высокий приоритет)
+	// Регистрируем CStyleForLoop обработчик для C-style циклов (самый высокий приоритет)
+	cStyleForLoopConfig := config.ConstructHandlerConfig{
+		ConstructType: common.ConstructCStyleForLoop,
+		Name:          "c-style-for-loop",
+		Priority:      95, // Выше приоритет, чем NumericForLoop
+		Order:         1,
+		IsEnabled:     true,
+		IsFallback:    false,
+		TokenPatterns: []config.TokenPattern{
+			{TokenType: lexer.TokenFor, Offset: 0},
+		},
+	}
+
+	cStyleForLoopHandler := handler.NewCStyleForLoopHandlerWithVerbose(cStyleForLoopConfig, verbose)
+	registry.RegisterConstructHandler(cStyleForLoopHandler, cStyleForLoopConfig)
+
+	// Регистрируем NumericForLoop обработчик для Lua циклов
 	numericForLoopConfig := config.ConstructHandlerConfig{
 		ConstructType: common.ConstructNumericForLoop,
 		Name:          "numeric-for-loop",
-		Priority:      90, // Высокий приоритет для Lua циклов
-		Order:         1,
+		Priority:      85, // Ниже приоритет, чем CStyleForLoop
+		Order:         2,
 		IsEnabled:     true,
 		IsFallback:    false,
 		TokenPatterns: []config.TokenPattern{
@@ -207,7 +244,7 @@ func NewUnifiedParserWithVerbose(verbose bool) *UnifiedParser {
 		ConstructType: common.ConstructForInLoop,
 		Name:          "for-in-loop",
 		Priority:      85, // Ниже приоритет, чем NumericForLoop
-		Order:         2,
+		Order:         3,
 		IsEnabled:     true,
 		IsFallback:    false,
 		TokenPatterns: []config.TokenPattern{
@@ -273,6 +310,29 @@ func NewUnifiedParserWithVerbose(verbose bool) *UnifiedParser {
 	languageCallStatementHandler := handler.NewLanguageCallStatementHandler(languageCallStatementConfig)
 	registry.RegisterConstructHandler(languageCallStatementHandler, languageCallStatementConfig)
 
+	// Регистрируем BackgroundTask обработчик для & токена и language tokens
+	// Должен иметь самый высокий приоритет для обработки background tasks
+	backgroundTaskConfig := config.ConstructHandlerConfig{
+		ConstructType: common.ConstructLanguageCall,
+		Name:          "background-task",
+		Priority:      200, // Самый высокий приоритет для background tasks
+		Order:         1,
+		IsEnabled:     true,
+		IsFallback:    false,
+		TokenPatterns: []config.TokenPattern{
+			{TokenType: lexer.TokenAmpersand, Offset: 0}, // Для случаев когда & в начале
+			{TokenType: lexer.TokenLua, Offset: 0},       // Для background tasks с языковыми токенами
+			{TokenType: lexer.TokenPython, Offset: 0},
+			{TokenType: lexer.TokenPy, Offset: 0},
+			{TokenType: lexer.TokenGo, Offset: 0},
+			{TokenType: lexer.TokenNode, Offset: 0},
+			{TokenType: lexer.TokenJS, Offset: 0},
+		},
+	}
+
+	backgroundTaskHandler := handler.NewBackgroundTaskHandler(backgroundTaskConfig)
+	registry.RegisterConstructHandler(backgroundTaskHandler, backgroundTaskConfig)
+
 	// Регистрируем While обработчик для while циклов
 	whileLoopConfig := config.ConstructHandlerConfig{
 		ConstructType: common.ConstructWhileLoop,
@@ -330,7 +390,7 @@ func NewUnifiedParserWithVerbose(verbose bool) *UnifiedParser {
 		IsEnabled:     true,
 		IsFallback:    false,
 		TokenPatterns: []config.TokenPattern{
-			{TokenType: 39, Offset: 0}, // TokenIf = 39 (реальное значение из отладки)
+			{TokenType: lexer.TokenIf, Offset: 0}, // Use proper token constant
 		},
 	}
 
@@ -341,7 +401,7 @@ func NewUnifiedParserWithVerbose(verbose bool) *UnifiedParser {
 	assignmentConfig := config.ConstructHandlerConfig{
 		ConstructType: common.ConstructAssignment,
 		Name:          "assignment",
-		Priority:      80, // Низкий приоритет, чтобы не мешать другим обработчикам
+		Priority:      96, // Выше IndexExpressionHandler (95) для поддержки индексного присваивания
 		Order:         4,
 		IsEnabled:     true,
 		IsFallback:    false,
@@ -384,7 +444,32 @@ func NewUnifiedParserWithVerbose(verbose bool) *UnifiedParser {
 		IsEnabled:     true,
 		IsFallback:    false,
 		TokenPatterns: []config.TokenPattern{
-			{TokenType: lexer.TokenIdentifier, Offset: 0}, // Для выражений типа "a = b + c"
+			{TokenType: lexer.TokenIdentifier, Offset: 0},    // Для выражений типа "a = b + c"
+			{TokenType: lexer.TokenNumber, Offset: 0},       // Для выражений типа "1 + 2"
+			{TokenType: lexer.TokenTrue, Offset: 0},         // Для выражений типа "true == false"
+			{TokenType: lexer.TokenFalse, Offset: 0},        // Для выражений типа "false != true"
+			{TokenType: lexer.TokenNil, Offset: 0},          // Для выражений типа "nil == nil"
+			{TokenType: lexer.TokenString, Offset: 0},       // Для выражений типа "'a' ++ 'b'"
+			{TokenType: lexer.TokenQuestion, Offset: 0},     // Для тернарных выражений типа "cond ? true : false"
+			{TokenType: lexer.TokenPlus, Offset: 0},         // Для бинарных выражений типа "a + b"
+			{TokenType: lexer.TokenMinus, Offset: 0},        // Для бинарных выражений типа "a - b"
+			{TokenType: lexer.TokenMultiply, Offset: 0},     // Для бинарных выражений типа "a * b"
+			{TokenType: lexer.TokenSlash, Offset: 0},        // Для бинарных выражений типа "a / b"
+			{TokenType: lexer.TokenModulo, Offset: 0},       // Для бинарных выражений типа "a % b"
+			{TokenType: lexer.TokenPower, Offset: 0},        // Для бинарных выражений типа "a ** b"
+			{TokenType: lexer.TokenEqual, Offset: 0},        // Для бинарных выражений типа "a == b"
+			{TokenType: lexer.TokenNotEqual, Offset: 0},     // Для бинарных выражений типа "a != b"
+			{TokenType: lexer.TokenLess, Offset: 0},         // Для бинарных выражений типа "a < b"
+			{TokenType: lexer.TokenLessEqual, Offset: 0},    // Для бинарных выражений типа "a <= b"
+			{TokenType: lexer.TokenGreater, Offset: 0},      // Для бинарных выражений типа "a > b"
+			{TokenType: lexer.TokenGreaterEqual, Offset: 0}, // Для бинарных выражений типа "a >= b"
+			{TokenType: lexer.TokenAnd, Offset: 0},          // Для бинарных выражений типа "a && b"
+			{TokenType: lexer.TokenOr, Offset: 0},           // Для бинарных выражений типа "a || b"
+			{TokenType: lexer.TokenAmpersand, Offset: 0},   // Для бинарных выражений типа "a & b"
+			{TokenType: lexer.TokenCaret, Offset: 0},        // Для бинарных выражений типа "a ^ b"
+			{TokenType: lexer.TokenDoubleLeftAngle, Offset: 0},  // Для бинарных выражений типа "a << b"
+			{TokenType: lexer.TokenDoubleRightAngle, Offset: 0}, // Для бинарных выражений типа "a >> b"
+			{TokenType: lexer.TokenConcat, Offset: 0},       // Для бинарных выражений типа "a ++ b"
 		},
 	}
 
@@ -406,6 +491,127 @@ func NewUnifiedParserWithVerbose(verbose bool) *UnifiedParser {
 
 	indexExpressionHandler := handler.NewIndexExpressionHandler(indexExpressionConfig)
 	registry.RegisterConstructHandler(indexExpressionHandler, indexExpressionConfig)
+
+	// Регистрируем UnaryExpression обработчик для унарных операций
+	unaryExpressionConfig := config.ConstructHandlerConfig{
+		ConstructType: common.ConstructUnaryExpression,
+		Name:          "unary-expression",
+		Priority:      150, // Очень высокий приоритет для унарных операторов (выше LanguageCall)
+		Order:         1,
+		IsEnabled:     true,
+		IsFallback:    false,
+		TokenPatterns: []config.TokenPattern{
+			{TokenType: lexer.TokenPlus, Offset: 0},   // +
+			{TokenType: lexer.TokenMinus, Offset: 0},  // -
+			{TokenType: lexer.TokenNot, Offset: 0},    // !
+			{TokenType: lexer.TokenTilde, Offset: 0},  // ~
+			{TokenType: lexer.TokenAt, Offset: 0},     // @
+		},
+	}
+
+	unaryExpressionHandler := handler.NewUnaryExpressionHandler(unaryExpressionConfig)
+	registry.RegisterConstructHandler(unaryExpressionHandler, unaryExpressionConfig)
+
+	// Регистрируем Literal обработчик для чисел (высокий приоритет)
+	literalConfig := config.ConstructHandlerConfig{
+		ConstructType: common.ConstructLiteral,
+		Name:          "literal",
+		Priority:      150, // Высокий приоритет для литералов
+		Order:         0,
+		IsEnabled:     true,
+		IsFallback:    false,
+		TokenPatterns: []config.TokenPattern{
+			{TokenType: lexer.TokenNumber, Offset: 0},
+			{TokenType: lexer.TokenMinus, Offset: 0}, // Для отрицательных чисел
+			{TokenType: lexer.TokenTrue, Offset: 0},  // Для булевых значений
+			{TokenType: lexer.TokenFalse, Offset: 0}, // Для булевых значений
+			{TokenType: lexer.TokenNil, Offset: 0},    // Для nil значения
+			{TokenType: lexer.TokenString, Offset: 0}, // Для строковых литералов
+		},
+	}
+
+	literalHandler := handler.NewLiteralHandler(literalConfig)
+	registry.RegisterConstructHandler(literalHandler, literalConfig)
+
+	// Регистрируем Expression обработчик для выражений (высокий приоритет для MINUS)
+	expressionMinusConfig := config.ConstructHandlerConfig{
+		ConstructType: common.ConstructExpression,
+		Name:          "expression-minus",
+		Priority:      160, // Высокий приоритет для обработки MINUS перед literal
+		Order:         10,
+		IsEnabled:     true,
+		IsFallback:    false,
+		TokenPatterns: []config.TokenPattern{
+			{TokenType: lexer.TokenMinus, Offset: 0}, // Обработаем MINUS перед literal
+		},
+	}
+
+	expressionMinusHandler := handler.NewExpressionHandler(expressionMinusConfig)
+	registry.RegisterConstructHandler(expressionMinusHandler, expressionMinusConfig)
+
+	// Регистрируем Expression обработчик для выражений (низкий приоритет для NUMBER)
+	expressionNumberConfig := config.ConstructHandlerConfig{
+		ConstructType: common.ConstructExpression,
+		Name:          "expression-number",
+		Priority:      5, // Низкий приоритет, чтобы вызываться после literal
+		Order:         11,
+		IsEnabled:     true,
+		IsFallback:    false,
+		TokenPatterns: []config.TokenPattern{
+			{TokenType: lexer.TokenNumber, Offset: 0}, // Обработаем NUMBER после literal
+		},
+	}
+
+	expressionNumberHandler := handler.NewExpressionHandler(expressionNumberConfig)
+	registry.RegisterConstructHandler(expressionNumberHandler, expressionNumberConfig)
+
+	// Регистрируем Array обработчик для массивов [1, 2, 3]
+	arrayConfig := config.ConstructHandlerConfig{
+		ConstructType: common.ConstructArray,
+		Name:          "array",
+		Priority:      200, // Высокий приоритет для массивов
+		Order:         10,
+		IsEnabled:     true,
+		IsFallback:    false,
+		TokenPatterns: []config.TokenPattern{
+			{TokenType: lexer.TokenLBracket, Offset: 0}, // Начинается с [
+		},
+	}
+
+	arrayHandler := handler.NewArrayHandler(200, 10)
+	registry.RegisterConstructHandler(arrayHandler, arrayConfig)
+
+	// Регистрируем VariableRead обработчик для чтения переменных
+	variableReadConfig := config.ConstructHandlerConfig{
+		ConstructType: common.ConstructVariableRead,
+		Name:          "variable-read",
+		Priority:      10, // Низкий приоритет, fallback для идентификаторов
+		Order:         15,
+		IsEnabled:     true,
+		IsFallback:    true,
+		TokenPatterns: []config.TokenPattern{
+			{TokenType: lexer.TokenIdentifier, Offset: 0}, // Обычные идентификаторы
+		},
+	}
+
+	variableReadHandler := handler.NewVariableReadHandler(variableReadConfig)
+	registry.RegisterConstructHandler(variableReadHandler, variableReadConfig)
+
+	// Регистрируем Object обработчик для объектов {"key": "value"}
+	objectConfig := config.ConstructHandlerConfig{
+		ConstructType: common.ConstructObject,
+		Name:          "object",
+		Priority:      200, // Высокий приоритет для объектов
+		Order:         11,
+		IsEnabled:     true,
+		IsFallback:    false,
+		TokenPatterns: []config.TokenPattern{
+			{TokenType: lexer.TokenLBrace, Offset: 0}, // Начинается с {
+		},
+	}
+
+	objectHandler := handler.NewObjectHandler(200, 11)
+	registry.RegisterConstructHandler(objectHandler, objectConfig)
 
 	return &UnifiedParser{
 		registry: registry,
@@ -464,33 +670,46 @@ func (p *UnifiedParser) Parse(input string) (ast.Statement, []ast.ParseError) {
 		tokens := []lexer.Token{currentToken}
 		handlers := p.registry.GetAllHandlersForTokenSequence(tokens)
 		if len(handlers) == 0 {
+			if p.verbose {
+				fmt.Printf("DEBUG: UnifiedParser - no handler found for token: %s (%s) at line %d col %d\n",
+					currentToken.Value, currentToken.Type, currentToken.Line, currentToken.Column)
+			}
 			parseErrors = append(parseErrors, ast.ParseError{
 				Type:     ast.ErrorSyntax,
 				Position: tokenToPosition(currentToken),
-				Message:  fmt.Sprintf("no handler found for token: %s", currentToken.Value),
+				Message:  fmt.Sprintf("no handler found for token: %s line %d col %d", currentToken.Value, currentToken.Line, currentToken.Column),
 				Context:  input,
 			})
 			break
 		}
 
-		// 6. Пробуем каждый обработчик в порядке приоритета
-		var lastErr error
-		var result interface{}
+	// 6. Пробуем каждый обработчик в порядке приоритета
+	var lastErr error
+	var result interface{}
+	var ctx *common.ParseContext
 
-		for i, h := range handlers {
-			// 7. Создаем клон потока для каждого обработчика
-			clonedStream := tokenStream.Clone()
+	if p.verbose {
+		fmt.Printf("DEBUG: UnifiedParser - available handlers: ")
+		for _, h := range handlers {
+			fmt.Printf("%s ", h.Name())
+		}
+		fmt.Printf("\n")
+	}
 
-			// 8. Проверяем, может ли обработчик обработать токен
-			if p.verbose {
-				fmt.Printf("DEBUG: UnifiedParser - trying handler: %s, CanHandle: %v\n", h.Name(), h.CanHandle(currentToken))
-			}
-			if !h.CanHandle(currentToken) {
-				continue
-			}
+	for i, h := range handlers {
+		// 7. Создаем клон потока для каждого обработчика
+		clonedStream := tokenStream.Clone()
 
-			// 9. Создаем контекст и вызываем обработчик с клоном потока
-			ctx := &common.ParseContext{
+		// 8. Проверяем, может ли обработчик обработать токен
+		if p.verbose {
+			fmt.Printf("DEBUG: UnifiedParser - current token: %s(%s), trying handler: %s, CanHandle: %v\n", currentToken.Type, currentToken.Value, h.Name(), h.CanHandle(currentToken))
+		}
+		if !h.CanHandle(currentToken) {
+			continue
+		}
+
+		// 9. Создаем контекст и вызываем обработчик с клоном потока
+		ctx = &common.ParseContext{
 				TokenStream: clonedStream,
 				Parser:      nil, // Не используем старый интерфейс
 				Depth:       0,
@@ -573,10 +792,10 @@ func (p *UnifiedParser) Parse(input string) (ast.Statement, []ast.ParseError) {
 				continue
 			}
 
-			// Если QualifiedVariableHandler возвращает конкретную ошибку,
-			// означающую, что это не квалифицированная переменная, то пробуем следующий обработчик
-			if err.Error() == "not a qualified variable" {
-				continue
+			// Если любой handler возвращает ошибку о неквалифицированной переменной, то это финальная ошибка
+			if strings.Contains(err.Error(), "not a qualified variable") {
+				lastErr = err
+				break
 			}
 
 			// Если LanguageCallHandler возвращает конкретную ошибку для неполных выражений,
@@ -586,11 +805,15 @@ func (p *UnifiedParser) Parse(input string) (ast.Statement, []ast.ParseError) {
 				break
 			}
 
-			// Если это первая ошибка (от самого высокоприоритетного обработчика),
+			// Если это ошибка от ReservedKeywordHandler (второй по приоритету после background-task),
 			// и это ошибка о присваивании зарезервированному слову, сохраняем её и выходим
-			if i == 0 && err.Error() == "cannot assign to reserved keyword 'lua'" ||
-				i == 0 && err.Error() == "cannot assign to reserved keyword 'python'" ||
-				i == 0 && err.Error() == "cannot assign to reserved keyword 'py'" {
+			if i == 1 && contains(err.Error(), "cannot assign to reserved keyword") {
+				lastErr = err
+				break
+			}
+
+			// Если это ошибка от ReservedKeywordHandler и это "not a qualified variable", сохраняем её и выходим
+			if i == 1 && err.Error() == "not a qualified variable" {
 				lastErr = err
 				break
 			}
@@ -601,47 +824,181 @@ func (p *UnifiedParser) Parse(input string) (ast.Statement, []ast.ParseError) {
 
 		if lastErr != nil {
 			// Все обработчики вернули ошибки
+			position := tokenToPosition(currentToken)
+			if posErr, ok := lastErr.(interface{ GetPosition() ast.Position }); ok {
+				position = posErr.GetPosition()
+			}
+
 			parseErrors = append(parseErrors, ast.ParseError{
 				Type:     ast.ErrorSyntax,
-				Position: tokenToPosition(currentToken),
+				Position: position,
 				Message:  lastErr.Error(),
 				Context:  input,
 			})
 			break
 		}
 
-		// 10. Конвертируем результат в Statement
-		if p.verbose {
-			fmt.Printf("DEBUG: UnifiedParser converting result to Statement, result type: %T\n", result)
-		}
-		if statement, ok := result.(ast.Statement); ok {
-			if p.verbose {
-				fmt.Printf("DEBUG: UnifiedParser appending statement: %T\n", statement)
+	// 10. Проверяем наличие индексных выражений [index] после array literal
+	// Это нужно сделать ДО конвертации в Statement
+	if arrayLit, ok := result.(*ast.ArrayLiteral); ok {
+		currentExpr := ast.Expression(arrayLit)
+		binaryHandler := handler.NewBinaryExpressionHandler(config.ConstructHandlerConfig{})
+		for ctx.TokenStream.HasMore() && ctx.TokenStream.Current().Type == lexer.TokenLBracket {
+			indexExpr, err := binaryHandler.ParseIndexExpression(ctx, currentExpr)
+			if err != nil {
+				parseErrors = append(parseErrors, ast.ParseError{
+					Type:     ast.ErrorSyntax,
+					Position: tokenToPosition(ctx.TokenStream.Current()),
+					Message:  err.Error(),
+					Context:  input,
+				})
+				break
 			}
-			statements = append(statements, statement)
-		} else if expression, ok := result.(ast.Expression); ok {
-			// Если результат - Expression, оборачиваем его в LanguageCallStatement
-			if langCall, ok := expression.(*ast.LanguageCall); ok {
-				langCallStmt := ast.NewLanguageCallStatement(langCall, langCall.Position())
-				statements = append(statements, langCallStmt)
+			currentExpr = indexExpr
+		}
+		result = currentExpr
+		// Синхронизируем основной tokenStream с ctx.TokenStream
+		tokenStream.SetPosition(ctx.TokenStream.Position())
+	}
+
+	// 11. Конвертируем результат в Statement
+	if p.verbose {
+		fmt.Printf("DEBUG: UnifiedParser converting result to Statement, result type: %T\n", result)
+	}
+	// Сначала проверяем LanguageCall и BuiltinFunctionCall специально (они реализуют Statement но нуждаются в special handling)
+	if langCall, ok := result.(*ast.LanguageCall); ok {
+		// Проверяем, идет ли после language call elvis/ternary оператор
+		if tokenStream.HasMore() && tokenStream.Current().Type == lexer.TokenQuestion {
+			// Это elvis или ternary выражение - продолжаем парсить
+			// Создаем новый контекст с основным tokenStream
+			elvisCtx := &common.ParseContext{
+				TokenStream: tokenStream,
+				Parser:      nil,
+				Depth:       0,
+				MaxDepth:    100,
+				Guard:       newProtoRecursionGuard(100),
+				LoopDepth:   0,
+				InputStream: input,
+			}
+			binaryExprHandler := handler.NewBinaryExpressionHandlerWithVerbose(config.ConstructHandlerConfig{}, p.verbose)
+			fullExpr, err := binaryExprHandler.ParseFullExpression(elvisCtx, langCall)
+			if err == nil && fullExpr != nil {
+				// Успешно распарсили полное выражение
+				// Синхронизируем позицию основного потока
+				tokenStream.SetPosition(elvisCtx.TokenStream.Position())
+				exprStmt := &ast.ExpressionStatement{Expression: fullExpr}
+				statements = append(statements, exprStmt)
+		} else {
+			// Если не получилось, LanguageCall реализует Statement интерфейс, добавляем напрямую
+			statements = append(statements, langCall)
+		}
+		} else {
+			// Нет elvis operator, LanguageCall реализует Statement интерфейс, добавляем напрямую
+			statements = append(statements, langCall)
+		}
+	} else if builtinCall, ok := result.(*ast.BuiltinFunctionCall); ok {
+		// Проверяем, идет ли после builtin call elvis/ternary оператор
+		if tokenStream.HasMore() && tokenStream.Current().Type == lexer.TokenQuestion {
+			// Это elvis или ternary выражение - продолжаем парсить
+			// Создаем новый контекст с основным tokenStream
+			elvisCtx := &common.ParseContext{
+				TokenStream: tokenStream,
+				Parser:      nil,
+				Depth:       0,
+				MaxDepth:    100,
+				Guard:       newProtoRecursionGuard(100),
+				LoopDepth:   0,
+				InputStream: input,
+			}
+			binaryExprHandler := handler.NewBinaryExpressionHandlerWithVerbose(config.ConstructHandlerConfig{}, p.verbose)
+			fullExpr, err := binaryExprHandler.ParseFullExpression(elvisCtx, builtinCall)
+			if err == nil && fullExpr != nil {
+				// Успешно распарсили полное выражение
+				// Синхронизируем позицию основного потока
+				tokenStream.SetPosition(elvisCtx.TokenStream.Position())
+				exprStmt := &ast.ExpressionStatement{Expression: fullExpr}
+				statements = append(statements, exprStmt)
 			} else {
-				// Для других типов выражений создаем обертку ExpressionStatement
-				// Но в текущем AST у нас нет ExpressionStatement, поэтому используем LanguageCallStatement
-				// Это временное решение, в будущем нужно добавить ExpressionStatement в AST
-				pos := expression.Position()
-				langCallStmt := ast.NewLanguageCallStatement(nil, pos) // Временное решение
-				// Устанавливаем выражение как внутреннее поле (нужно будет модифицировать LanguageCallStatement)
-				statements = append(statements, langCallStmt)
+				// Если не получилось, просто оборачиваем BuiltinFunctionCall в ExpressionStatement
+				exprStmt := &ast.ExpressionStatement{Expression: builtinCall}
+				statements = append(statements, exprStmt)
 			}
 		} else {
-			parseErrors = append(parseErrors, ast.ParseError{
-				Type:     ast.ErrorSemantic,
-				Position: tokenToPosition(currentToken),
-				Message:  "result is not a statement",
-				Context:  input,
-			})
-			break
+			// Просто оборачиваем BuiltinFunctionCall в ExpressionStatement
+			exprStmt := &ast.ExpressionStatement{Expression: builtinCall}
+			statements = append(statements, exprStmt)
 		}
+	} else if statement, ok := result.(ast.Statement); ok {
+		if p.verbose {
+			fmt.Printf("DEBUG: UnifiedParser appending statement: %T\n", statement)
+		}
+		statements = append(statements, statement)
+	} else if expression, ok := result.(ast.Expression); ok {
+		// Если результат - Expression, проверяем, реализует ли он также Statement
+		if statement, ok := expression.(ast.Statement); ok {
+			// Если Expression также является Statement (например, PipeExpression), добавляем его напрямую
+			statements = append(statements, statement)
+		} else if pipeExpr, ok := expression.(*ast.PipeExpression); ok {
+			// PipeExpression реализует оба интерфейса Expression и Statement
+			statements = append(statements, pipeExpr)
+		} else {
+				// Для выражений от ExpressionHandler, оборачиваем в ExpressionStatement
+				if _, isTernaryExpr := expression.(*ast.TernaryExpression); isTernaryExpr {
+					exprStmt := &ast.ExpressionStatement{Expression: expression}
+					statements = append(statements, exprStmt)
+				} else if _, isElvisExpr := expression.(*ast.ElvisExpression); isElvisExpr {
+					exprStmt := &ast.ExpressionStatement{Expression: expression}
+					statements = append(statements, exprStmt)
+				} else if _, isBinaryExpr := expression.(*ast.BinaryExpression); isBinaryExpr {
+					exprStmt := &ast.ExpressionStatement{Expression: expression}
+					statements = append(statements, exprStmt)
+				} else if _, isUnaryExpr := expression.(*ast.UnaryExpression); isUnaryExpr {
+					exprStmt := &ast.ExpressionStatement{Expression: expression}
+					statements = append(statements, exprStmt)
+				} else if _, isIdentifier := expression.(*ast.Identifier); isIdentifier {
+					exprStmt := &ast.ExpressionStatement{Expression: expression}
+					statements = append(statements, exprStmt)
+				} else if _, isNumberLiteral := expression.(*ast.NumberLiteral); isNumberLiteral {
+					exprStmt := &ast.ExpressionStatement{Expression: expression}
+					statements = append(statements, exprStmt)
+				} else if _, isArrayLiteral := expression.(*ast.ArrayLiteral); isArrayLiteral {
+					exprStmt := &ast.ExpressionStatement{Expression: expression}
+					statements = append(statements, exprStmt)
+				} else if _, isObjectLiteral := expression.(*ast.ObjectLiteral); isObjectLiteral {
+					exprStmt := &ast.ExpressionStatement{Expression: expression}
+					statements = append(statements, exprStmt)
+			} else if _, isBooleanLiteral := expression.(*ast.BooleanLiteral); isBooleanLiteral {
+				exprStmt := &ast.ExpressionStatement{Expression: expression}
+				statements = append(statements, exprStmt)
+			} else if _, isNilLiteral := expression.(*ast.NilLiteral); isNilLiteral {
+				exprStmt := &ast.ExpressionStatement{Expression: expression}
+				statements = append(statements, exprStmt)
+			} else if _, isStringLiteral := expression.(*ast.StringLiteral); isStringLiteral {
+				exprStmt := &ast.ExpressionStatement{Expression: expression}
+				statements = append(statements, exprStmt)
+			} else if _, isVariableRead := expression.(*ast.VariableRead); isVariableRead {
+					exprStmt := &ast.ExpressionStatement{Expression: expression}
+					statements = append(statements, exprStmt)
+				} else {
+					// Для других типов выражений, игнорируем (они должны быть частью других конструкций)
+					if p.verbose {
+						fmt.Printf("DEBUG: UnifiedParser - ignoring expression result that should be part of a statement: %T\n", expression)
+					}
+					continue // Пропускаем это выражение, оно должно быть частью другого statement
+				}
+			}
+	} else {
+		if p.verbose {
+			fmt.Printf("DEBUG: UnifiedParser - result is neither Statement nor Expression: %T (value: %v)\n", result, result)
+		}
+		parseErrors = append(parseErrors, ast.ParseError{
+			Type:     ast.ErrorSemantic,
+			Position: tokenToPosition(currentToken),
+			Message:  fmt.Sprintf("result is not a statement (got %T)", result),
+			Context:  input,
+		})
+		break
+	}
 	}
 
 	// 11. Если были ошибки парсинга, возвращаем их
@@ -664,6 +1021,45 @@ func (p *UnifiedParser) Parse(input string) (ast.Statement, []ast.ParseError) {
 		return blockStmt, nil
 	}
 
+
+	// 14. Если не было распарсено ни одного statement, пытаемся распарсить как standalone expression
+	if len(statements) == 0 {
+		if p.verbose {
+			fmt.Printf("DEBUG: UnifiedParser - no statements parsed, trying expression fallback\n")
+		}
+
+		// Создаем новый лексер для всего ввода
+		fallbackLexer := lexer.NewLexer(input)
+		fallbackTokenStream := stream.NewTokenStream(fallbackLexer)
+
+		// Собираем все токены выражения, пропуская newlines
+		exprTokens := []lexer.Token{}
+		for fallbackTokenStream.HasMore() {
+			token := fallbackTokenStream.Current()
+			if token.Type != lexer.TokenNewline {
+				exprTokens = append(exprTokens, token)
+			}
+			fallbackTokenStream.Consume()
+		}
+
+		if p.verbose {
+			fmt.Printf("DEBUG: UnifiedParser - expression fallback tokens: %v\n", exprTokens)
+		}
+
+		// Пробуем распарсить как выражение
+		if len(exprTokens) > 0 {
+			expr, exprErr := exprparser.ParseExpression(exprTokens)
+			if p.verbose {
+				fmt.Printf("DEBUG: UnifiedParser - expression parse result: expr=%v, err=%v\n", expr, exprErr)
+			}
+			if exprErr == nil && expr != nil {
+				// Успешно распарсили выражение, оборачиваем в ExpressionStatement
+				exprStmt := &ast.ExpressionStatement{Expression: expr}
+				return exprStmt, nil
+			}
+		}
+	}
+
 	// Этот код не должен достигаться, но на всякий случай
 	return nil, []ast.ParseError{{
 		Type:     ast.ErrorSyntax,
@@ -671,6 +1067,68 @@ func (p *UnifiedParser) Parse(input string) (ast.Statement, []ast.ParseError) {
 		Message:  "no statements parsed",
 		Context:  input,
 	}}
+}
+
+// tryParseLineAsExpression пытается распарсить текущую строку как выражение
+func (p *UnifiedParser) tryParseLineAsExpression(tokenStream stream.TokenStream, input string, statements *[]ast.Statement) bool {
+	// Найдем начало и конец текущей строки
+	currentPos := tokenStream.Position()
+	lineStart := strings.LastIndex(input[:currentPos], "\n")
+	if lineStart == -1 {
+		lineStart = 0
+	} else {
+		lineStart++ // После \n
+	}
+
+	lineEnd := strings.Index(input[currentPos:], "\n")
+	if lineEnd == -1 {
+		lineEnd = len(input)
+	} else {
+		lineEnd += currentPos
+	}
+
+	lineInput := input[lineStart:lineEnd]
+	if p.verbose {
+		fmt.Printf("DEBUG: UnifiedParser - trying line expression for: '%s'\n", lineInput)
+	}
+
+	// Создаем новый лексер для строки
+	fallbackLexer := lexer.NewLexer(lineInput)
+	fallbackTokenStream := stream.NewTokenStream(fallbackLexer)
+
+	// Собираем токены строки
+	lineTokens := []lexer.Token{}
+	for fallbackTokenStream.HasMore() {
+		token := fallbackTokenStream.Current()
+		if token.Type != lexer.TokenNewline {
+			lineTokens = append(lineTokens, token)
+		}
+		fallbackTokenStream.Consume()
+	}
+
+	// Пробуем распарсить как выражение
+	if len(lineTokens) > 0 {
+		expr, exprErr := exprparser.ParseExpression(lineTokens)
+		if p.verbose {
+			fmt.Printf("DEBUG: UnifiedParser - line expression parse result: expr=%v, err=%v\n", expr, exprErr)
+		}
+		if exprErr == nil && expr != nil {
+			// Успешно распарсили, создаем ExpressionStatement
+			exprStmt := &ast.ExpressionStatement{Expression: expr}
+			*statements = append(*statements, exprStmt)
+
+			// Продвигаем основной поток до конца строки
+			for tokenStream.HasMore() {
+				currToken := tokenStream.Current()
+				tokenStream.Consume()
+				if currToken.Type == lexer.TokenNewline {
+					break
+				}
+			}
+			return true
+		}
+	}
+	return false
 }
 
 // tokenToPosition конвертирует токен в позицию AST

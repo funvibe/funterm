@@ -1,9 +1,6 @@
 package handler
 
 import (
-	"fmt"
-	"strconv"
-
 	"go-parser/pkg/ast"
 	"go-parser/pkg/common"
 	"go-parser/pkg/config"
@@ -35,20 +32,20 @@ func (h *IndexExpressionHandler) Handle(ctx *common.ParseContext) (interface{}, 
 	// 1. Читаем объект (например, dict)
 	objectToken := tokenStream.Current()
 	if objectToken.Type != lexer.TokenIdentifier {
-		return nil, fmt.Errorf("expected identifier for object, got %s", objectToken.Type)
+		return nil, newErrorWithTokenPos(objectToken, "expected identifier for object, got %s", objectToken.Type)
 	}
 	tokenStream.Consume()
 	object := ast.NewIdentifier(objectToken, objectToken.Value)
 
 	// 2. Проверяем и потребляем LEFT_BRACKET
 	if !tokenStream.HasMore() || tokenStream.Current().Type != lexer.TokenLBracket {
-		return nil, fmt.Errorf("expected LEFT_BRACKET after object '%s'", objectToken.Value)
+		return nil, newErrorWithPos(tokenStream, "expected LEFT_BRACKET after object '%s'", objectToken.Value)
 	}
 	tokenStream.Consume() // потребляем LEFT_BRACKET
 
 	// 3. Парсим индекс (может быть любое выражение)
 	if !tokenStream.HasMore() {
-		return nil, fmt.Errorf("expected index expression after LEFT_BRACKET")
+		return nil, newErrorWithPos(tokenStream, "expected index expression after LEFT_BRACKET")
 	}
 
 	// Простая обработка индекса - пока только строковые литералы и числа
@@ -69,28 +66,21 @@ func (h *IndexExpressionHandler) Handle(ctx *common.ParseContext) (interface{}, 
 	case lexer.TokenNumber:
 		tokenStream.Consume()
 		// Создаем числовой литерал - конвертируем строку в число
-		numValue, err := strconv.ParseFloat(indexToken.Value, 64)
+		numValue, err := parseNumber(indexToken.Value)
 		if err != nil {
-			return nil, fmt.Errorf("invalid number literal: %s", indexToken.Value)
+			return nil, newErrorWithTokenPos(indexToken, "invalid number literal: %s", indexToken.Value)
 		}
-		indexExpr = &ast.NumberLiteral{
-			Value: numValue,
-			Pos: ast.Position{
-				Line:   indexToken.Line,
-				Column: indexToken.Column,
-				Offset: indexToken.Position,
-			},
-		}
+		indexExpr = createNumberLiteral(indexToken, numValue)
 	case lexer.TokenIdentifier:
 		tokenStream.Consume()
 		indexExpr = ast.NewIdentifier(indexToken, indexToken.Value)
 	default:
-		return nil, fmt.Errorf("unsupported index type: %s", indexToken.Type)
+		return nil, newErrorWithTokenPos(indexToken, "unsupported index type: %s", indexToken.Type)
 	}
 
 	// 4. Проверяем и потребляем RIGHT_BRACKET
 	if !tokenStream.HasMore() || tokenStream.Current().Type != lexer.TokenRBracket {
-		return nil, fmt.Errorf("expected RIGHT_BRACKET after index expression")
+		return nil, newErrorWithPos(tokenStream, "expected RIGHT_BRACKET after index expression")
 	}
 	tokenStream.Consume() // потребляем RIGHT_BRACKET
 

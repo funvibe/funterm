@@ -315,7 +315,7 @@ func (pr *PythonRuntime) GetGlobalVariables() []string {
 	for name := range pr.variables {
 		// Skip internal variables that start with "_" but not "__"
 		// This allows important global variables like "__name__", "__file__", etc.
-		if !strings.HasPrefix(name, "_") || strings.HasPrefix(name, "__") {
+		if strings.HasPrefix(name, "__") {
 			variables = append(variables, name)
 		}
 	}

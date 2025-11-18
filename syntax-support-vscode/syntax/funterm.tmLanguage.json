@@ -1,0 +1,428 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Funterm",
+  "scopeName": "source.funterm",
+  "patterns": [
+    {
+      "include": "#comments"
+    },
+    {
+      "include": "#import-statements"
+    },
+    {
+      "include": "#keywords"
+    },
+    {
+      "include": "#control-flow"
+    },
+    {
+      "include": "#language-blocks"
+    },
+    {
+      "include": "#bitstring-operations"
+    },
+    {
+      "include": "#pattern-matching"
+    },
+    {
+      "include": "#operators"
+    },
+    {
+      "include": "#literals"
+    },
+    {
+      "include": "#variables"
+    },
+    {
+      "include": "#function-calls"
+    }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.funterm",
+          "begin": "//",
+          "end": "$"
+        },
+        {
+          "name": "comment.line.hash.funterm",
+          "begin": "#",
+          "end": "$"
+        },
+        {
+          "name": "comment.line.double-dash.funterm",
+          "begin": "--",
+          "end": "$"
+        },
+        {
+          "name": "comment.block.funterm",
+          "begin": "/\\*",
+          "end": "\\*/"
+        }
+      ]
+    },
+    "import-statements": {
+      "patterns": [
+        {
+          "name": "keyword.control.import.funterm",
+          "match": "\\b(import)\\s+(python|py|lua|js|node|go)\\s+(\"[^\"]*\"|'[^']*')",
+          "captures": {
+            "1": {
+              "name": "keyword.control.import.funterm"
+            },
+            "2": {
+              "name": "support.type.language.funterm"
+            },
+            "3": {
+              "name": "string.quoted.funterm"
+            }
+          }
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.funterm",
+          "match": "\\b(break|continue|return|match|if|else|for|while|in)\\b"
+        },
+        {
+          "name": "keyword.other.funterm",
+          "match": "\\b(true|false|null|nil)\\b"
+        }
+      ]
+    },
+    "control-flow": {
+      "patterns": [
+        {
+          "name": "keyword.control.if.funterm",
+          "match": "\\b(if|else)\\b"
+        },
+        {
+          "name": "keyword.control.while.funterm",
+          "match": "\\bwhile\\b"
+        },
+        {
+          "name": "keyword.control.for.funterm",
+          "match": "\\bfor\\b"
+        },
+        {
+          "name": "keyword.control.in.funterm",
+          "match": "\\bin\\b"
+        },
+        {
+          "name": "keyword.control.match.funterm",
+          "match": "\\bmatch\\b"
+        },
+        {
+          "name": "keyword.control.break.funterm",
+          "match": "\\bbreak\\b"
+        },
+        {
+          "name": "keyword.control.continue.funterm",
+          "match": "\\bcontinue\\b"
+        }
+      ]
+    },
+    "language-blocks": {
+      "patterns": [
+        {
+          "name": "entity.name.function.language-block.funterm",
+          "match": "\\b(python|py|lua|js|node|go)\\b",
+          "captures": {
+            "1": {
+              "name": "support.type.language.funterm"
+            }
+          }
+        },
+        {
+          "name": "meta.language-block.funterm",
+          "begin": "(python|py|lua|js|node|go)(\\s*\\()",
+          "beginCaptures": {
+            "1": {
+              "name": "support.type.language.funterm"
+            },
+            "2": {
+              "name": "punctuation.definition.parameters.begin.funterm"
+            }
+          },
+          "end": "\\)",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.definition.parameters.end.funterm"
+            }
+          },
+          "patterns": [
+            {
+              "match": "\\b[a-zA-Z_][a-zA-Z0-9_]*\\b",
+              "name": "variable.parameter.function.funterm"
+            },
+            {
+              "match": ",",
+              "name": "punctuation.separator.parameters.funterm"
+            }
+          ]
+        },
+        {
+          "name": "meta.language-block.braces.funterm",
+          "begin": "(python|py|lua|js|node|go)(\\s*\\{)",
+          "beginCaptures": {
+            "1": {
+              "name": "support.type.language.funterm"
+            },
+            "2": {
+              "name": "punctuation.section.block.begin.funterm"
+            }
+          },
+          "end": "\\}",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.block.end.funterm"
+            }
+          },
+          "contentName": "source.embedded.funterm",
+          "patterns": [
+            {
+              "include": "source"
+            }
+          ]
+        }
+      ]
+    },
+    "bitstring-operations": {
+      "patterns": [
+        {
+          "name": "keyword.operator.bitstring.funterm",
+          "match": "<<|>>"
+        },
+        {
+          "name": "string.other.bitstring.funterm",
+          "begin": "<<",
+          "end": ">>",
+          "patterns": [
+            {
+              "include": "#bitstring-patterns"
+            },
+            {
+              "include": "#bitstring-types"
+            },
+            {
+              "include": "#literals"
+            }
+          ]
+        }
+      ]
+    },
+    "bitstring-patterns": {
+      "patterns": [
+        {
+          "name": "variable.other.bitstring-pattern.funterm",
+          "match": "\\b[a-zA-Z_][a-zA-Z0-9_]*\\b(?=\\s*[:/])"
+        },
+        {
+          "name": "keyword.operator.bitstring-separator.funterm",
+          "match": ","
+        }
+      ]
+    },
+    "bitstring-types": {
+      "patterns": [
+        {
+          "name": "support.type.bitstring.funterm",
+          "match": "\\b(binary|bytes|bitstring|bits|integer|float|utf8|utf16|utf32|signed|unsigned|big|little|native|unit)\\b"
+        },
+        {
+          "name": "constant.numeric.bitstring-size.funterm",
+          "match": "\\b\\d+(?=:)"
+        },
+        {
+          "name": "keyword.operator.bitstring-unit.funterm",
+          "match": "\\bunit:\\d+\\b"
+        }
+      ]
+    },
+    "pattern-matching": {
+      "patterns": [
+        {
+          "name": "keyword.operator.match-arrow.funterm",
+          "match": "->"
+        },
+        {
+          "name": "keyword.operator.match-assignment.funterm",
+          "match": "<<.*?>>\\s*=\\s*"
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.concatenation.funterm",
+          "match": "\\+\\+"
+        },
+        {
+          "name": "keyword.operator.arithmetic.funterm",
+          "match": "\\+|\\-|\\*|/|%|\\*\\*"
+        },
+        {
+          "name": "keyword.operator.comparison.funterm",
+          "match": "==|!=|<=|>=|<|>"
+        },
+        {
+          "name": "keyword.operator.logical.funterm",
+          "match": "&&|\\|\\||!"
+        },
+        {
+          "name": "keyword.operator.assignment.funterm",
+          "match": "="
+        },
+        {
+          "name": "keyword.operator.ternary.funterm",
+          "match": "\\?|:"
+        },
+        {
+          "name": "keyword.operator.elvis.funterm",
+          "match": "\\?:"
+        },
+        {
+          "name": "keyword.operator.pipe.funterm",
+          "match": "\\|>"
+        },
+        {
+          "name": "keyword.operator.bitwise.funterm",
+          "match": "&|\\||\\^|~"
+        },
+        {
+          "name": "keyword.operator.background.funterm",
+          "match": "&"
+        },
+        {
+          "name": "keyword.operator.size.funterm",
+          "match": "@"
+        }
+      ]
+    },
+    "literals": {
+      "patterns": [
+        {
+          "name": "constant.numeric.funterm",
+          "match": "\\b\\d+(\\.\\d+)?([eE][+-]?\\d+)?\\b"
+        },
+        {
+          "name": "constant.numeric.hex.funterm",
+          "match": "\\b0[xX][0-9a-fA-F]+\\b"
+        },
+        {
+          "name": "constant.numeric.binary.funterm",
+          "match": "\\b0[bB][01]+\\b"
+        },
+        {
+          "name": "string.quoted.double.funterm",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.funterm",
+              "match": "\\\\."
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.single.funterm",
+          "begin": "'",
+          "end": "'",
+          "patterns": [
+            {
+              "name": "constant.character.escape.funterm",
+              "match": "\\\\."
+            }
+          ]
+        }
+      ]
+    },
+    "variables": {
+      "patterns": [
+        {
+          "name": "variable.other.language-qualified.funterm",
+          "match": "\\b(python|py|lua|js|node|go)\\.[a-zA-Z_][a-zA-Z0-9_]*\\b",
+          "captures": {
+            "1": {
+              "name": "support.type.language.funterm"
+            }
+          }
+        },
+        {
+          "name": "variable.other.funterm",
+          "match": "\\b[a-zA-Z_][a-zA-Z0-9_]*\\b"
+        }
+      ]
+    },
+    "function-calls": {
+      "patterns": [
+        {
+          "name": "meta.function-call.funterm",
+          "match": "(\\b[a-zA-Z_][a-zA-Z0-9_]*\\b)(\\s*\\()",
+          "captures": {
+            "1": {
+              "name": "entity.name.function.funterm"
+            },
+            "2": {
+              "name": "punctuation.definition.parameters.begin.funterm"
+            }
+          }
+        },
+        {
+          "name": "meta.function-call.qualified.funterm",
+          "match": "(\\b(python|py|lua|js|node|go)\\.[a-zA-Z_][a-zA-Z0-9_]*\\b)(\\s*\\()",
+          "captures": {
+            "1": {
+              "name": "entity.name.function.funterm"
+            },
+            "2": {
+              "name": "support.type.language.funterm"
+            },
+            "3": {
+              "name": "punctuation.definition.parameters.begin.funterm"
+            }
+          }
+        }
+      ]
+    },
+    "punctuation": {
+      "patterns": [
+        {
+          "name": "punctuation.terminator.funterm",
+          "match": ";"
+        },
+        {
+          "name": "punctuation.separator.funterm",
+          "match": ","
+        },
+        {
+          "name": "punctuation.section.block.begin.funterm",
+          "match": "\\{"
+        },
+        {
+          "name": "punctuation.section.block.end.funterm",
+          "match": "\\}"
+        },
+        {
+          "name": "punctuation.section.group.begin.funterm",
+          "match": "\\("
+        },
+        {
+          "name": "punctuation.section.group.end.funterm",
+          "match": "\\)"
+        },
+        {
+          "name": "punctuation.section.brackets.begin.funterm",
+          "match": "\\["
+        },
+        {
+          "name": "punctuation.section.brackets.end.funterm",
+          "match": "\\]"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,111 @@
+%YAML 1.2
+---
+# Funterm Syntax for Sublime Text
+# Based on VS Code TextMate grammar
+name: Funterm
+file_extensions:
+  - su
+scope: source.funterm
+
+contexts:
+  main:
+    # Comments
+    - match: '//'
+      scope: punctuation.definition.comment.funterm
+      push: line_comment
+    
+    - match: '/\*'
+      scope: punctuation.definition.comment.begin.funterm
+      push: block_comment
+    
+    # Strings
+    - match: '"'
+      scope: punctuation.definition.string.begin.funterm
+      push: double_quoted_string
+    
+    - match: "'"
+      scope: punctuation.definition.string.begin.funterm
+      push: single_quoted_string
+    
+    # Language blocks
+    - match: '\b(python|lua|js|javascript|node|go)\s*\{'
+      captures:
+        1: keyword.control.language.funterm
+      scope: meta.block.language.funterm
+    
+    # Keywords
+    - match: '\b(if|else|while|for|in|break|continue|return|match|import)\b'
+      scope: keyword.control.funterm
+    
+    # Operators
+    - match: '(\+\+|--|==|!=|<=|>=|&&|\|\||->|\|>|<<|>>|\*\*)'
+      scope: keyword.operator.funterm
+    
+    - match: '[+\-*/%=<>!&|^~]'
+      scope: keyword.operator.funterm
+    
+    # Numbers
+    - match: '\b0x[0-9a-fA-F]+\b'
+      scope: constant.numeric.hex.funterm
+    
+    - match: '\b0b[01]+\b'
+      scope: constant.numeric.binary.funterm
+    
+    - match: '\b\d+\.?\d*([eE][+-]?\d+)?\b'
+      scope: constant.numeric.funterm
+    
+    # Boolean and nil
+    - match: '\b(true|false|nil)\b'
+      scope: constant.language.boolean.funterm
+    
+    # Bitstring patterns
+    - match: '<<'
+      scope: punctuation.definition.bitstring.begin.funterm
+      push: bitstring
+    
+    # Variables and functions
+    - match: '\b[a-zA-Z_][a-zA-Z0-9_]*\s*(?=\()'
+      scope: entity.name.function.funterm
+    
+    - match: '\b[a-zA-Z_][a-zA-Z0-9_]*'
+      scope: variable.other.funterm
+
+  line_comment:
+    - meta_scope: comment.line.double-slash.funterm
+    - match: $
+      pop: true
+
+  block_comment:
+    - meta_scope: comment.block.funterm
+    - match: '\*/'
+      scope: punctuation.definition.comment.end.funterm
+      pop: true
+
+  double_quoted_string:
+    - meta_scope: string.quoted.double.funterm
+    - match: '\\.'
+      scope: constant.character.escape.funterm
+    - match: '"'
+      scope: punctuation.definition.string.end.funterm
+      pop: true
+
+  single_quoted_string:
+    - meta_scope: string.quoted.single.funterm
+    - match: '\\.'
+      scope: constant.character.escape.funterm
+    - match: "'"
+      scope: punctuation.definition.string.end.funterm
+      pop: true
+
+  bitstring:
+    - meta_scope: meta.bitstring.funterm
+    - match: '>>'
+      scope: punctuation.definition.bitstring.end.funterm
+      pop: true
+    - match: ':'
+      scope: punctuation.separator.funterm
+    - match: '/'
+      scope: punctuation.separator.funterm
+    - match: '\b(binary|integer|float|utf8|utf16|utf32|big|little|signed|unsigned)\b'
+      scope: storage.type.funterm
+    - include: main

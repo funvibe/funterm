@@ -1,6 +1,6 @@
 lua.var = 7
-for var = 1,2 do
+for var = 0,2 {
     lua.print(var)
     lua.print(lua.var)
-end
+}
 lua.print(lua.var)

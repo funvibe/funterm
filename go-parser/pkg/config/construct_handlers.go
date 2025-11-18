@@ -50,23 +50,23 @@ var HandlersConfig = []ConstructHandlerConfig{
 		},
 	},
 
-	// Заглушки для будущих типов конструкций (отключены)
+	// Number literals (включено)
 	{
 		ConstructType: common.ConstructLiteral,
 		Name:          "number-literal",
 		Priority:      90,
 		Order:         1,
-		IsEnabled:     false, // Отключено, пока не реализован лексер для чисел
+		IsEnabled:     true, // Включено для поддержки чисел
 		TokenPatterns: []TokenPattern{
 			{
-				TokenType: lexer.TokenUnknown, // Будет заменено на TokenNumber
+				TokenType: lexer.TokenNumber, // Используем TokenNumber
 				Offset:    0,
 			},
 		},
 		CustomParams: map[string]interface{}{
 			"supportsDecimal": true,
 			"supportsHex":     true,
-			"supportsBinary":  false,
+			"supportsBinary":  true,
 		},
 	},
 	{
@@ -102,25 +102,6 @@ var HandlersConfig = []ConstructHandlerConfig{
 		},
 		CustomParams: map[string]interface{}{
 			"pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$",
-		},
-	},
-
-	// Кортежи (отключены, пока не реализованы соответствующие обработчики)
-	{
-		ConstructType: common.ConstructTuple,
-		Name:          "tuple-constructor",
-		Priority:      70,
-		Order:         1,
-		IsEnabled:     false, // Отключено, пока не реализован отдельный обработчик
-		TokenPatterns: []TokenPattern{
-			{
-				TokenType: lexer.TokenLeftParen,
-				Offset:    0,
-			},
-		},
-		CustomParams: map[string]interface{}{
-			"maxElements": 100,
-			"allowEmpty":  true,
 		},
 	},
 

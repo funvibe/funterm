@@ -1,0 +1,35 @@
+// Test for huge integers in bitstrings
+// This test ensures that very large integers are handled correctly in bitstring contexts
+
+x = <<999999999999999999999999999999999999999999999999999999999999999999999999999999999:64>>
+
+// Test with negative huge integer
+y = <<-999999999999999999999999999999999999999999999999999999999999999999999999999999999:64>>
+
+// Test with hexadecimal huge integer
+z = <<0x123456789ABCDEF123456789ABCDEF123456789ABCDEF123456789ABCDEF123456789ABCDEF123456789ABCDEF:128>>
+
+// Print the results to verify they were created successfully
+lua.print(x)
+lua.print(y)
+lua.print(z)
+
+// Test truncation for positive huge int
+huge_pos = <<999999999999999999999999999999999999999999999999999999999999999999999999999999999:8>>
+
+// Test truncation for signed negative huge int (two's complement)
+huge_neg_sig = <<-999999999999999999999999999999999999999999999999999999999999999999999999999999999:8/signed>>
+
+// Test truncation for negative huge int (two's complement)
+huge_neg = <<-999999999999999999999999999999999999999999999999999999999999999999999999999999999:8>>
+
+// Test hex truncation
+huge_hex = <<0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF:8>>
+
+lua.print("Truncated positive:", huge_pos)
+lua.print("Truncated signed negative:", huge_neg_sig)
+lua.print("Truncated negative:", huge_neg)
+lua.print("Truncated hex:", huge_hex)
+
+short_signed = <<-2:8/signed>>
+lua.print("Short signed negative:", short_signed)

@@ -1,0 +1,34 @@
+// Simple test for numeric for loop with step functionality
+
+// Test 1: Basic positive step with curly brace syntax
+for i = 0, 11, 2 {
+    lua.print("step_2", i)
+}
+
+// Test 2: Basic positive step with curly brace syntax
+for i = 1, 10, 3 {
+    js.print("step_3", i)
+}
+
+// Test 3: Step of 1 (should be equivalent to no step)
+for i = 5, 9, 1 {
+    lua.print("step_1", i)
+}
+
+// Test 4: Larger step
+for i = 0, 21, 5 {
+    js.print("step_5", i)
+}
+
+// Test 5: Step with variables
+start = 2
+end_val = 15
+step_val = 4
+for i = start, end_val, step_val {
+    lua.print("variable_step", i)
+}
+
+// Test 6: Step with simple number
+for i = 0, 7, 2 {
+    js.print("simple_step", i)
+}

@@ -16,11 +16,16 @@ const (
 	NodeParentheses
 	NodeArrayLiteral
 	NodeObjectLiteral
+	NodeStringLiteral
+	NodeNumberLiteral
+	NodeBooleanLiteral
+	NodeNilLiteral
 	NodeVariableAssignment
 	NodeVariableRead
 	NodeIdentifier
 	NodeForInLoop      // Python for-in цикл
 	NodeNumericForLoop // Lua числовой цикл
+	NodeCStyleForLoop  // C-style for цикл
 	NodeWhileLoop      // While цикл
 	NodeBreak          // Break оператор
 	NodeContinue       // Continue оператор
@@ -72,6 +77,8 @@ func (t NodeType) String() string {
 		return "ForInLoop"
 	case NodeNumericForLoop:
 		return "NumericForLoop"
+	case NodeCStyleForLoop:
+		return "CStyleForLoop"
 	case NodeWhileLoop:
 		return "WhileLoop"
 	case NodeBreak:

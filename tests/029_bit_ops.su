@@ -1,0 +1,27 @@
+// Bitwise AND operation
+and_result = 16 & 4
+lua.print(and_result)
+
+// Bitwise OR operation
+or_result = 8 | 4
+lua.print(or_result)
+
+// Bitwise XOR operation
+xor_result = 5 ^ 3
+lua.print(xor_result)
+
+// Bitwise NOT operation
+not_result = ~5
+lua.print(not_result)
+
+// Left shift operation
+left_shift_result = 3 << 2
+lua.print(left_shift_result)
+
+// Right shift operation
+right_shift_result = 16 >> 2
+lua.print(right_shift_result)
+
+// Complex bitwise expression
+complex_result = (12 & 8) | (4 ^ 2)
+lua.print(complex_result)

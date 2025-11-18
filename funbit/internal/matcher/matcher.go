@@ -178,6 +178,9 @@ func (m *Matcher) Match(bitstring *bitstringpkg.BitString) ([]bitstringpkg.Segme
 	currentOffset := uint(0)
 	context := NewDynamicSizeContext()
 
+	// Initialize context with registered variables
+	m.initializeContextFromRegisteredVariables(context)
+
 	for i, segment := range m.pattern {
 		if err := bitstringpkg.ValidateSegment(segment); err != nil {
 			return nil, bitstringpkg.NewBitStringErrorWithContext(bitstringpkg.CodeInvalidSegment,
@@ -1596,4 +1599,41 @@ func (m *Matcher) bindBitstringValue(variable interface{}, value *bitstringpkg.B
 	}
 
 	return nil
+}
+
+// initializeContextFromRegisteredVariables initializes the dynamic size context with registered variables
+func (m *Matcher) initializeContextFromRegisteredVariables(context *DynamicSizeContext) {
+	for name, variable := range m.variables {
+		// Extract the current value from the variable pointer
+		value := m.extractValueFromVariable(variable)
+		context.AddVariable(name, value)
+	}
+}
+
+// extractValueFromVariable extracts the current uint value from a variable pointer
+func (m *Matcher) extractValueFromVariable(variable interface{}) uint {
+	val := reflect.ValueOf(variable)
+
+	// Check if it's a pointer
+	if val.Kind() != reflect.Ptr {
+		return 0
+	}
+
+	// Dereference the pointer
+	val = val.Elem()
+
+	// Check if it's settable
+	if !val.IsValid() {
+		return 0
+	}
+
+	// Convert to uint based on type
+	switch val.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return uint(val.Int())
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return uint(val.Uint())
+	default:
+		return 0
+	}
 }

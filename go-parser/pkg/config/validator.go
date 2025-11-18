@@ -101,12 +101,16 @@ func validateHandler(handler ConstructHandlerConfig, index int) error {
 	// Validate ConstructType is valid
 	validConstructTypes := map[string]bool{
 		"literal":          true,
-		"tuple":            true,
 		"function":         true,
 		"variable":         true,
 		"group":            true,
+		"tuple":            true,
+		"match":            true,
 		"for_in_loop":      true,
 		"numeric_for_loop": true,
+		"if":               true,
+		"code_block":       true,
+		"language_call":    true,
 	}
 	if !validConstructTypes[string(handler.ConstructType)] {
 		return &ValidationError{

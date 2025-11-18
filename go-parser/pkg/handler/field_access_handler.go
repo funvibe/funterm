@@ -53,7 +53,7 @@ func (h *FieldAccessHandler) Handle(ctx *common.ParseContext) (interface{}, erro
 		firstToken.Type != lexer.TokenGo &&
 		firstToken.Type != lexer.TokenNode &&
 		firstToken.Type != lexer.TokenJS {
-		return nil, fmt.Errorf("expected identifier as first part of field access, got %s", firstToken.Type)
+		return nil, newErrorWithTokenPos(firstToken, "expected identifier as first part of field access, got %s", firstToken.Type)
 	}
 
 	if h.verbose {
@@ -96,7 +96,7 @@ func (h *FieldAccessHandler) Handle(ctx *common.ParseContext) (interface{}, erro
 			(tokenStream.Current().Type != lexer.TokenIdentifier &&
 				tokenStream.Current().Type != lexer.TokenTrue &&
 				tokenStream.Current().Type != lexer.TokenFalse) {
-			return nil, fmt.Errorf("expected field name after DOT")
+			return nil, newErrorWithPos(tokenStream, "expected field name after DOT")
 		}
 		fieldToken := tokenStream.Consume()
 		fieldCount++

@@ -2,11 +2,12 @@ package engine
 
 import (
 	"fmt"
+	"math/big"
+	"strings"
 
 	"funterm/errors"
 	"funterm/shared"
 	"go-parser/pkg/ast"
-	sharedparser "go-parser/pkg/shared"
 
 	"github.com/funvibe/funbit/pkg/funbit"
 )
@@ -77,17 +78,50 @@ func (e *ExecutionEngine) executeMatchStatement(matchStmt *ast.MatchStatement) (
 	}
 
 	if err != nil {
-		return nil, errors.NewSystemError("MATCH_EXPRESSION_EVALUATION_ERROR", fmt.Sprintf("failed to evaluate match expression: %v", err))
+		return nil, errors.NewUserErrorWithASTPos("MATCH_EXPRESSION_EVALUATION_ERROR", fmt.Sprintf("failed to evaluate match expression: %v", err), matchStmt.Expression.Position())
 	}
 
 	// Iterate through match arms
 	for _, arm := range matchStmt.Arms {
 		// Try to match the pattern
-		if matches, bindings := e.matchesPattern(arm.Pattern, subject); matches {
+		matches, bindings := e.matchesPattern(arm.Pattern, subject)
+
+		// Check if there's an error in bindings (even if pattern didn't match)
+		if err, exists := bindings["__error__"]; exists {
+			if errVal, ok := err.(error); ok {
+				// Extract the error code and message
+				errMsg := errVal.Error()
+				// Check for specific error codes in the message
+				if strings.Contains(errMsg, "OVERFLOW_ERROR") {
+					return nil, errors.NewUserErrorWithASTPos("OVERFLOW_ERROR", "size overflow in expression", matchStmt.Position())
+				} else if strings.Contains(errMsg, "DIVISION_BY_ZERO_ERROR") {
+					return nil, errors.NewUserErrorWithASTPos("DIVISION_BY_ZERO_ERROR", "division by zero in size expression", matchStmt.Position())
+				} else if strings.Contains(errMsg, "NEGATIVE_SIZE_ERROR") {
+					return nil, errors.NewUserErrorWithASTPos("NEGATIVE_SIZE_ERROR", "negative size in pattern matching", matchStmt.Position())
+				} else if strings.Contains(errMsg, "UNDEFINED_VARIABLE_ERROR") {
+					return nil, errors.NewUserErrorWithASTPos("UNDEFINED_VARIABLE_ERROR", errMsg, matchStmt.Position())
+				} else if strings.Contains(errMsg, "undefined variable") {
+					// Handle undefined variable errors from pattern conversion
+					return nil, errors.NewUserErrorWithASTPos("UNDEFINED_VARIABLE_ERROR", errMsg, matchStmt.Position())
+				} else {
+					// Generic user error
+					return nil, errors.NewUserErrorWithASTPos("PATTERN_MATCHING_ERROR", errMsg, matchStmt.Position())
+				}
+			}
+		}
+
+		if matches {
 			// Pattern matched, execute the body with any variable bindings
 			if len(bindings) > 0 {
+				// Filter out the __error__ key from bindings before executing
+				cleanBindings := make(map[string]interface{})
+				for k, v := range bindings {
+					if k != "__error__" {
+						cleanBindings[k] = v
+					}
+				}
 				// Create a temporary scope for bound variables
-				return e.executeStatementWithBindings(arm.Statement, bindings)
+				return e.executeStatementWithBindings(arm.Statement, cleanBindings)
 			} else {
 				// No bindings, but still create local scope for local variables
 				return e.executeStatementWithLocalScope(arm.Statement)
@@ -96,7 +130,7 @@ func (e *ExecutionEngine) executeMatchStatement(matchStmt *ast.MatchStatement) (
 	}
 
 	// No pattern matched
-	return nil, errors.NewUserError("NO_PATTERN_MATCH", "no pattern in match statement matched the value")
+	return nil, errors.NewUserErrorWithASTPos("NO_PATTERN_MATCH", "no pattern in match statement matched the value", matchStmt.Position())
 }
 
 // matchesPattern checks if a pattern matches a value and returns any variable bindings
@@ -150,6 +184,68 @@ func (e *ExecutionEngine) compareValues(a, b interface{}) bool {
 	if aStr, ok := a.(string); ok {
 		if bStr, ok := b.(string); ok {
 			return aStr == bStr
+		}
+	}
+
+	// Handle big.Int comparison
+	if aBig, ok := a.(*big.Int); ok {
+		// Convert big.Int to int64 if possible for comparison
+		if aBig.IsInt64() {
+			aInt64 := aBig.Int64()
+			if bNum, ok := b.(int64); ok {
+				return aInt64 == bNum
+			}
+			if bNum, ok := b.(int); ok {
+				return aInt64 == int64(bNum)
+			}
+			if bNum, ok := b.(float64); ok {
+				return float64(aInt64) == bNum
+			}
+			if bNum, ok := b.(uint64); ok {
+				if aInt64 >= 0 {
+					return uint64(aInt64) == bNum
+				}
+				return false
+			}
+		}
+		// For big.Int that doesn't fit in int64, try to convert b to big.Int
+		if bNum, ok := b.(int64); ok {
+			bBig := big.NewInt(bNum)
+			return aBig.Cmp(bBig) == 0
+		}
+		if bNum, ok := b.(int); ok {
+			bBig := big.NewInt(int64(bNum))
+			return aBig.Cmp(bBig) == 0
+		}
+	}
+	if bBig, ok := b.(*big.Int); ok {
+		// Convert big.Int to int64 if possible for comparison
+		if bBig.IsInt64() {
+			bInt64 := bBig.Int64()
+			if aNum, ok := a.(int64); ok {
+				return aNum == bInt64
+			}
+			if aNum, ok := a.(int); ok {
+				return int64(aNum) == bInt64
+			}
+			if aNum, ok := a.(float64); ok {
+				return aNum == float64(bInt64)
+			}
+			if aNum, ok := a.(uint64); ok {
+				if bInt64 >= 0 {
+					return aNum == uint64(bInt64)
+				}
+				return false
+			}
+		}
+		// For big.Int that doesn't fit in int64, try to convert a to big.Int
+		if aNum, ok := a.(int64); ok {
+			aBig := big.NewInt(aNum)
+			return aBig.Cmp(bBig) == 0
+		}
+		if aNum, ok := a.(int); ok {
+			aBig := big.NewInt(int64(aNum))
+			return aBig.Cmp(bBig) == 0
 		}
 	}
 
@@ -354,11 +450,28 @@ func (e *ExecutionEngine) matchesBitstringPattern(pattern *ast.BitstringPattern,
 	patternExpr := e.convertBitstringPatternToExpression(pattern)
 
 	// Use funbit adapter for pattern matching
+	// For match statements, return error on pattern matching failure (original behavior)
 	adapter := NewFunbitAdapterWithEngine(e)
-	bindings, err := adapter.MatchBitstringWithFunbit(patternExpr, bitstringData)
+	bindings, err := adapter.MatchBitstringWithFunbit(patternExpr, bitstringData, false)
+	if e.verbose {
+		fmt.Printf("DEBUG: matchesBitstringPattern - raw bindings from funbit: %v\n", bindings)
+	}
 	if err != nil {
 		if e.verbose {
 			fmt.Printf("DEBUG: matchesBitstringPattern - funbit matching failed: %v\n", err)
+		}
+		// Check if this is a user error (like undefined variable, overflow, division by zero, negative size)
+		// and return it properly through bindings
+		if isUserError(err) {
+			// Extract the error message
+			errMsg := err.Error()
+			return false, map[string]interface{}{"__error__": fmt.Errorf("%s", errMsg)}
+		}
+		
+		// Also check for undefined variable error from failed pattern conversion
+		if strings.Contains(err.Error(), "undefined variable") {
+			errMsg := err.Error()
+			return false, map[string]interface{}{"__error__": fmt.Errorf("%s", errMsg)}
 		}
 		return false, nil
 	}
@@ -367,9 +480,17 @@ func (e *ExecutionEngine) matchesBitstringPattern(pattern *ast.BitstringPattern,
 		fmt.Printf("DEBUG: matchesBitstringPattern - funbit matching succeeded, bindings: %v\n", bindings)
 	}
 
+	// Filter out wildcard '_' bindings
+	filteredBindings := make(map[string]interface{})
+	for k, v := range bindings {
+		if k != "_" {
+			filteredBindings[k] = v
+		}
+	}
+
 	// The pattern matched if funbit matching succeeded (no error)
 	// Bindings may be empty for literal patterns
-	return true, bindings
+	return true, filteredBindings
 }
 
 // convertBitstringPatternToExpression converts BitstringPattern to BitstringExpression for the adapter
@@ -394,20 +515,17 @@ func (e *ExecutionEngine) convertBitstringPatternToExpression(pattern *ast.Bitst
 }
 
 func (e *ExecutionEngine) executeStatementWithBindings(stmt ast.Statement, bindings map[string]interface{}) (interface{}, error) {
-	// Create a new local scope for the bound variables
-	// This ensures pattern matching variables are available locally
-	// and don't interfere with runtime variables
+	// Create a new nested scope for the bound variables
+	// This ensures pattern matching variables are isolated to the match arm
+	// and don't leak to the outer scope
 
-	// Save the current scope
-	oldScope := e.localScope
+	// Push a new scope onto the stack
+	e.pushScope()
+	defer e.popScope()
 
-	// Create a new scope with the old scope as parent
-	newScope := sharedparser.NewScope(oldScope)
-	e.localScope = newScope
-
-	// Set bound variables in the local scope
+	// Set bound variables in the current scope
 	for name, value := range bindings {
-		newScope.Set(name, value)
+		e.setVariable(name, value)
 		if e.verbose {
 			fmt.Printf("DEBUG: executeStatementWithBindings - set local variable '%s' = %v\n", name, value)
 		}
@@ -416,37 +534,55 @@ func (e *ExecutionEngine) executeStatementWithBindings(stmt ast.Statement, bindi
 	// Execute the statement with the new scope
 	result, err := e.executeStatement(stmt)
 
-	// Copy bound variables to the parent scope before restoring
-	// This makes variables extracted from match patterns available in subsequent statements
-	for name, value := range bindings {
-		oldScope.Set(name, value)
-		if e.verbose {
-			fmt.Printf("DEBUG: executeStatementWithBindings - copied variable '%s' to parent scope\n", name)
-		}
+	if e.verbose {
+		fmt.Printf("DEBUG: executeStatementWithBindings - completed, variables are isolated to match arm\n")
 	}
-
-	// Restore the old scope (now with copied variables)
-	e.localScope = oldScope
 
 	return result, err
 }
 
 func (e *ExecutionEngine) executeStatementWithLocalScope(stmt ast.Statement) (interface{}, error) {
-	// Create a new local scope for local variables
-	// This ensures local variables in match arms don't interfere with global scope
+	// Create a new nested scope for local variables
+	// This ensures local variables in match arms don't interfere with outer scope
 
-	// Save the current scope
-	oldScope := e.localScope
-
-	// Create a new scope with the old scope as parent
-	newScope := sharedparser.NewScope(oldScope)
-	e.localScope = newScope
+	// Push a new scope onto the stack
+	e.pushScope()
+	defer e.popScope()
 
 	// Execute the statement with the new scope
 	result, err := e.executeStatement(stmt)
 
-	// Restore the old scope
-	e.localScope = oldScope
+	if e.verbose {
+		fmt.Printf("DEBUG: executeStatementWithLocalScope - completed, local variables are isolated\n")
+	}
 
 	return result, err
+}
+
+// isUserError checks if an error is a user-friendly error (from UserError wrapper)
+// These are errors that should be propagated to the user directly
+func isUserError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	errMsg := err.Error()
+	
+	// Check for user error patterns that are created by mapFunbitErrorToUserError
+	// These are prefixed with error codes in brackets
+	userErrorPatterns := []string{
+		"[USER]",
+		"OVERFLOW_ERROR",
+		"DIVISION_BY_ZERO_ERROR",
+		"NEGATIVE_SIZE_ERROR",
+		"UNDEFINED_VARIABLE_ERROR",
+	}
+	
+	for _, pattern := range userErrorPatterns {
+		if strings.Contains(errMsg, pattern) {
+			return true
+		}
+	}
+	
+	return false
 }

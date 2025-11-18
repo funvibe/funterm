@@ -53,7 +53,7 @@ func (e *ExecutionEngine) executeBitstringExpression(expr *ast.BitstringExpressi
 	// Use the funbit adapter to execute the bitstring expression
 	bitstringObject, err := adapter.ExecuteBitstringExpression(expr)
 	if err != nil {
-		return nil, errors.NewSystemError("BITSTRING_EXECUTION_ERROR", fmt.Sprintf("failed to execute bitstring expression: %v", err))
+		return nil, errors.NewUserError("BITSTRING_EXECUTION_ERROR", fmt.Sprintf("failed to execute bitstring expression: %v", err))
 	}
 
 	if e.verbose {

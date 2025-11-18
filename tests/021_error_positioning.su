@@ -1,0 +1,6 @@
+# This is a comment
+x = 1
+y = 2
+# Syntax error on next line - missing closing parenthesis
+js.print("hello"
+z = 3

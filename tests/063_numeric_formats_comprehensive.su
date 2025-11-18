@@ -1,0 +1,150 @@
+// Comprehensive test for all numeric formats and operators
+// Covers decimal, hex, binary, scientific notation
+// with all available operators: arithmetic, bitwise, logical, comparison
+
+// Basic numeric formats
+decimal = 42
+hex_val = 0x2A
+binary_val = 0b101010
+scientific = 1.23e-4
+
+// Arithmetic operators: +, -, *, /, %, **
+arithmetic_sum = decimal + hex_val + binary_val
+arithmetic_diff = decimal - hex_val
+arithmetic_mult = hex_val * binary_val
+arithmetic_div = binary_val / decimal
+arithmetic_mod = hex_val % decimal
+arithmetic_pow = 2 ** 8
+
+lua.print("Arithmetic:", arithmetic_sum, arithmetic_diff, arithmetic_mult, arithmetic_div, arithmetic_mod, arithmetic_pow)
+
+// Bitwise operators: &, |, ^, <<, >>, ~
+bitwise_and = 0xF0 & 0x0F
+bitwise_or = 0xF0 | 0x0F
+bitwise_xor = 0b1010 ^ 0b1100
+bitwise_lshift = 1 << 4
+bitwise_rshift = 16 >> 2
+bitwise_not = ~0x0F
+
+lua.print("Bitwise:", bitwise_and, bitwise_or, bitwise_xor, bitwise_lshift, bitwise_rshift, bitwise_not)
+
+// Comparison operators: ==, !=, <, >, <=, >=
+comp_eq = decimal == hex_val
+comp_ne = decimal != hex_val
+comp_lt = decimal < hex_val + 1
+comp_gt = hex_val > decimal - 1
+comp_le = binary_val <= 42
+comp_ge = hex_val >= 42
+
+lua.print("Comparison:", comp_eq, comp_ne, comp_lt, comp_gt, comp_le, comp_ge)
+
+// Logical operators: &&, ||
+logic_and = (decimal > 0) && (hex_val > 0)
+logic_or = (decimal < 0) || (hex_val > 0)
+
+lua.print("Logical:", logic_and, logic_or)
+
+// Unary operators: -, !
+unary_neg = -decimal
+unary_not = !comp_eq
+
+lua.print("Unary:", unary_neg, unary_not)
+
+// Ternary operator: ? (basic ternary works, nested has precedence issues)
+ternary_result = decimal > 40 ? "big" : "small"
+lua.print("Ternary:", ternary_result)
+
+// Note: Nested ternary expressions have precedence issues and require further work
+nested_ternary = (10 > 0) ? (5 > 0) ? 1 : 2 : (3 > 0) ? 3 : 4
+lua.print("Nested ternary:", nested_ternary)
+
+// Elvis operator: ?:
+elvis_result = nil ?: "default"
+lua.print("Elvis:", elvis_result)
+
+// String concatenation: ++
+concat_result = "value: " ++ decimal ++ " hex: " ++ hex_val
+lua.print("Concat:", concat_result)
+
+// Complex mixed expression
+complex_result = (decimal + hex_val * binary_val) ** 2 / scientific + decimal % 10
+lua.print("Complex result:", complex_result)
+
+// Scientific notation operations
+sci_mult = scientific * 10000
+sci_div = scientific / 2
+sci_add = scientific + 0.001
+
+lua.print("Scientific:", sci_mult, sci_div, sci_add)
+
+// Mixed numeric types in expressions
+mixed_expr = decimal * scientific + hex_val / binary_val - 0b1
+lua.print("Mixed types:", mixed_expr)
+
+// Conditional expressions with mixed formats
+if (0xFF > 250 && 0b1111 == 15) || !(decimal < 0) {
+    lua.print("Complex condition: true")
+}
+
+// Big integer test (smaller number)
+big_num = 1000000
+big_result = big_num + 1
+lua.print("Big int:", big_result)
+
+// Complex binary expressions with different number formats
+(0b1 | 0b01) >> 2 ^ 0xFF
+0x01 | 0x04 | 0x10
+
+unary_binary_complex = -6 - -3 * -2
+lua.print("Unary binary complex:", unary_binary_complex)
+
+-6 - -3 * -2
+
+// Test language calls in expressions
+lua_simple_call = lua.tonumber("5")
+lua.print("Lua simple call:", lua_simple_call)
+
+lua_language_call_sum = lua.tonumber("5") + lua.tonumber("1")
+lua.print("Lua language call sum:", lua_language_call_sum)
+
+// Test unary operators with language calls
+unary_lang_call = -lua.tonumber("5")
+lua.print("Unary language call:", unary_lang_call)
+
+unary_lang_call_sum = -lua.tonumber("5") + lua.tonumber("1")
+lua.print("Unary language call sum:", unary_lang_call_sum)
+
+// Test ternary with language calls
+ternary_funcs = lua.tostring("test") ? lua.string.upper("true") : lua.tostring("false")
+lua.print("Ternary funcs:", ternary_funcs)
+
+(10 > 0) ? (5 > 0) ? 1 : 2 : (3 > 0) ? 3 : 4
+
+"a" ?: "b" ?: "c" ?: "d"
+elv = "a" ?: "b" ?: "c" ?: "d"
+print(elv)
+1 ? 2 : 3 ? 4 : 5 ? 6 : 7
+
+a = b = 3
+x = y = z = (a ** b) / a / b
+print(a, b, x, y, z)
+
+lua.x = lua.y = 5
+lua.a = lua.b = lua.c = lua.x ** lua.y / (lua.x + 0) * lua.y
+print(lua.a, lua.b, lua.c, lua.x, lua.y)
+
+(lua.string.len("a") + lua.string.len("test")) * (lua.math.abs(5) - lua.tonumber("3")) ? (lua.string.len("x") + lua.string.len("y")) : (lua.math.abs(1) & python.tonumber("2")) + ([1,2,3][0] ?: "default")
+ultimate_complex = (lua.string.len("a") + lua.string.len("test")) * (lua.math.abs(5) - lua.tonumber("3")) ? (lua.string.len("x") + lua.string.len("y")) : (lua.math.abs(1) & python.tonumber("2")) + ([1,2,3][0] ?: "default")
+print(ultimate_complex)
+
+!-~1
+multiple_unary = !-~1
+print(multiple_unary)
+
+[[1,2],[3,4]][0][1]
+a = [[1,2],[3,4]][0][1]
+print(a)
+
+[10, 20, 30][(1 + 2) * 0]
+complex_index = [10, 20, 30][(1 + 2) * 0]
+print(complex_index)

@@ -1,0 +1,4 @@
+py.result1 = 5 | 3
+py.result2 = 12 | 10
+py.result3 = 1 | 2 | 4
+lua.print("Bitwise OR results:", py.result1, py.result2, py.result3)

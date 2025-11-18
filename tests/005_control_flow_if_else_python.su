@@ -1,6 +1,8 @@
 py.x = 10
-if (py.x > 5) {
+if py.x > 5 {
     py.result = "greater"
+} else if py.x < 0 {
+    py.result = "negative"
 } else {
     py.result = "smaller"
 }

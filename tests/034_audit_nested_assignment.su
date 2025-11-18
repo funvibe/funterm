@@ -1,0 +1,3 @@
+py.data = {"users": []}
+py.data.users[0] = {"name": "test", "age": 25}
+py.data.users[0].age = 26

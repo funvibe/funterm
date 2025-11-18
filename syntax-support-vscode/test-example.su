@@ -1,0 +1,345 @@
+// Funterm Syntax Highlighting Test
+// This file demonstrates ACTUAL syntax features from regression tests
+
+// ===== COMMENTS =====
+# Python style comment
+-- Lua style comment
+// C++ style comment
+/* Block comment
+   spanning multiple lines */
+
+// ===== IMPORT STATEMENTS =====
+import lua "helpers.lua"
+import python "utils.py"
+import js "module.js"
+
+// ===== LANGUAGE BLOCKS =====
+python {
+    print("Hello from Python")
+    x = 42
+}
+
+py {
+    print("Hello from Python (alias)")
+    x = 42
+}
+
+lua {
+    print("Hello from Lua")
+    y = "test"
+}
+
+js {
+    console.log("Hello from JavaScript")
+    z = [1, 2, 3]
+}
+
+node {
+    console.log("Hello from Node.js")
+    z = [1, 2, 3]
+}
+
+go {
+    fmt.Println("Hello from Go")
+}
+
+// Language blocks with parameters
+python (database, query_user) {
+    import sqlite3
+    database = sqlite3.connect(":memory:")
+    
+    def query_user(user_id):
+        cursor = database.cursor()
+        cursor.execute("SELECT name FROM users WHERE id = ?", (user_id,))
+        return cursor.fetchone()
+}
+
+py (background_task) {
+    def background_task():
+        import time
+        time.sleep(0.2)
+        print("Background task completed")
+}
+
+// ===== CONTROL FLOW =====
+// If statements
+if (py.x > 5) {
+    lua.print("x is greater than 5")
+}
+
+if py.x > 5 {
+    lua.print("x is greater than 5 without parens")
+} else {
+    lua.print("x is not greater than 5")
+}
+
+// While loops
+while (py.i <= 10) {
+    lua.print("iteration:", py.i)
+    py.i = py.i + 1
+}
+
+while py.i <= 10 {
+    lua.print("iteration without parens:", py.i)
+    py.i = py.i + 1
+}
+
+// ===== FOR LOOPS (ACTUAL SYNTAX FROM TESTS) =====
+
+// Lua-style numeric for loops (from regression tests)
+for i = 1, 3 {
+    lua.print("lua-style loop:", i)
+}
+
+// Lua-style with step
+for i = 0, 10, 2 {
+    lua.print("lua-style with step:", i)
+}
+
+// Lua-style with negative step
+for i = 10, 0, -2 {
+    lua.print("countdown:", i)
+}
+
+// Python-style for-in loops
+numbers = [1, 2, 3, 4, 5]
+for item in numbers {
+    lua.print("for-in loop:", item)
+}
+
+// For-in with array literals
+for num in [1, 2, 3, 4] {
+    lua.print("num:", num)
+}
+
+// Nested for-in loops
+matrix = [[1, 2], [3, 4]]
+for row in matrix {
+    for element in row {
+        lua.print("element:", element)
+    }
+}
+
+// C-style for loops with parentheses
+for (i = 0; i < 3; i = i + 1) {
+    python.print("c-style with parens:", i)
+}
+
+// C-style for loops without parentheses
+for i = 0; i < 3; i = i + 1 {
+    python.print("c-style without parens:", i)
+}
+
+// Empty components
+for ; i < 5; i = i + 1 {
+    python.print("empty init:", i)
+}
+
+for i = 0; ; i = i + 1 {
+    python.print("empty cond:", i)
+    if (i >= 2) {
+        break
+    }
+}
+
+for i = 0; i < 3; {
+    python.print("empty inc:", i)
+    i = i + 1
+}
+
+for ; ; {
+    python.print("infinite loop")
+    break
+}
+
+// ===== PATTERN MATCHING =====
+lua.packet = <<0xDEADBEEF:32/big, 256:16/little, "payload"/binary>>
+
+match lua.packet {
+    <<header:32/big, size:16/little, data/binary>> -> {
+        lua.print("Header:", lua.string.format("0x%08X", header))
+        lua.print("Size:", size, "bytes")
+        lua.print("Data:", data)
+    }
+}
+
+// Inplace pattern matching
+<<header:32/big, size:16/little, data/binary>> = lua.packet
+lua.print("Direct extraction:", header, size, data)
+
+// Pattern matching from tests
+lua.disk_usage = go.exec("df -h / | awk 'NR==2{print $5}'")
+match lua.disk_usage {
+    << percent:8, "%", rest/binary >> -> {
+        if (percent > 80) {
+            lua.print("WARNING: disk usage ", percent, "%")
+        } else {
+            lua.print("DISK USAGE: OK")
+        }
+    },
+    _ -> lua.print("Failed to parse disk usage")
+}
+
+// ===== BITSTRING OPERATIONS =====
+// Basic construction
+lua.empty = <<>>
+lua.single_byte = <<42>>
+lua.three_bytes = <<1, 2, 3>>
+lua.from_string = <<"hello">>
+
+// Bitstring with variable sizes
+lua.dynamic = <<5:8, "Hello":40/binary, "extra":40/binary>>
+match lua.dynamic {
+    <<size:8, content:size/binary, rest/binary>> -> {
+        lua.print("Size:", size, "Content:", content, "Rest:", rest)
+    }
+}
+
+// Bitstring types and specifiers
+lua.bitstring = <<
+    42:8/integer,
+    3.14:32/float,
+    "text"/binary,
+    "hello"/utf8,
+    0xFF:16/big,
+    0x1234:16/little
+>>
+
+// ===== OPERATORS =====
+// Arithmetic
+result = a + b * c - d / e % f ** 2
+
+// String concatenation (ACTUAL OPERATOR FROM TESTS)
+message = "Hello" ++ " " ++ "World"
+str_num = "result: " ++ int_sum
+num_str = "value: " ++ float_a
+
+// From regression/028_cstyle_for.su
+for (outer=0; outer<2; outer=outer+1) {
+    for (inner=0; inner<2; inner=inner+1) {
+        lua.print(outer ++ "-" ++ inner)
+    }
+}
+
+// Bitwise operators
+py.result1 = 5 | 3
+py.result2 = 12 & 10
+py.result3 = 1 | 2 | 4
+and_result = 12 & 10
+xor_result = 5 ^ 3
+
+// Logical operators
+if (py.x > 0 && lua.y < 10 || !flag) {
+    lua.print("complex condition")
+}
+
+// Ternary and Elvis operators
+py.x = 15
+py.result = py.x > 10 ? "greater than 10" : "less than or equal to 10"
+grade = score >= 80 ? "A" : score >= 70 ? "B" : "C"
+
+// Elvis operator
+config = lua.config ?: "default.conf"
+
+// Pipe operator
+py.to_upper("hello pipes") |> lua.string.lower()
+result = py.process_text("hello") |> lua.add_prefix() |> js.format_json()
+
+// Background execution
+py.background_task() &
+py.print("After background task start")
+
+// ===== QUALIFIED VARIABLES =====
+py.x = 42
+lua.message = "Hello"
+js.array = [1, 2, 3]
+node.array = [1, 2, 3]
+go.result = calculate()
+
+// ===== FUNCTION CALLS =====
+lua.print("Hello", "World")
+python.print("Value:",  py.x)
+js.console.log("Array:", js.array)
+node.console.log("Array:", node.array)
+go.fmt.Println("Result:", go.result)
+
+// ===== NESTED STRUCTURES =====
+if (true) {
+    py.outer = "outer"
+    if (true) {
+        lua.inner = "inner"
+        lua.print("Nested:", py.outer, lua.inner)
+    }
+}
+
+// ===== LITERALS =====
+// Numbers
+hex_value = 0xDEADBEEF
+binary_value = 0b10101010
+float_value = 3.14159
+scientific = 1.23e-4
+
+// Strings
+string_single = 'Hello'
+string_double = "World"
+
+// Arrays and objects
+data = [1, 2, 3, 4, 5]
+config = {"host": "localhost", "port": 8080}
+
+// Booleans and null values
+is_true = true
+is_false = false
+is_null = null
+is_nil = nil
+
+// ===== BREAK AND CONTINUE =====
+for i = 0; i < 10; i = i + 1 {
+    if (i == 3) {
+        continue
+    }
+    if (i == 7) {
+        break
+    }
+    lua.print(i)
+}
+
+// Break in for-in loop (from tests)
+for item in items {
+    if (item == 2) {
+        break
+    }
+}
+
+// ===== REAL EXAMPLES FROM REGRESSION TESTS =====
+
+// From regression/006_control_flow_for_loop.su
+lua.flags = [true, false, true]
+for flag in lua.flags {
+    lua.print(flag ? 1 : 0)
+}
+
+// From regression/025_for_in_curly_braces.su
+numbers = [10, 20, 30]
+total = 0
+for item in numbers {
+    total = total + item
+}
+lua.print("Total:", total)
+
+// From regression/016_dynamic.su
+lua.flags = [true, false, true, false]
+lua.flag_bits = <<>>
+for flag in lua.flags {
+    lua.flag_bits = <<lua.flag_bits/bitstring, (flag ? 1 : 0):1>>
+}
+
+// From regression/024_numeric_for_loop_negative_step.su
+for i = 15, 5, -3 {
+    js.print("negative_step_3", i)
+}
+
+// From regression/022_curly_brace_for_loops.su
+for i = 1,3 {
+    js.print("curly_1", i)
+}

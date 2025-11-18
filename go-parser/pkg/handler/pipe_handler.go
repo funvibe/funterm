@@ -1,8 +1,6 @@
 package handler
 
 import (
-	"fmt"
-
 	"go-parser/pkg/ast"
 	"go-parser/pkg/common"
 	"go-parser/pkg/config"
@@ -24,14 +22,23 @@ func NewPipeHandler(config config.ConstructHandlerConfig) *PipeHandler {
 
 // CanHandle проверяет, может ли обработчик обработать токен
 func (h *PipeHandler) CanHandle(token lexer.Token) bool {
-	// PipeHandler обрабатывает идентификаторы и токены языков, но проверяет наличие | в потоке
-	// Должен иметь самый низкий приоритет (1)
-	return token.IsLanguageIdentifierOrCallToken()
+	// PipeHandler обрабатывает идентификаторы, токены языков, скобки и операторы | и |>
+	return token.IsLanguageIdentifierOrCallToken() ||
+		token.Type == lexer.TokenLeftParen ||
+		token.Type == lexer.TokenPipe ||
+		token.Type == lexer.TokenBitwiseOr
 }
 
 // Handle обрабатывает pipe expression
 func (h *PipeHandler) Handle(ctx *common.ParseContext) (interface{}, error) {
 	tokenStream := ctx.TokenStream
+	currentToken := tokenStream.Current()
+
+	// Если текущий токен - это оператор |, то мы находимся в середине pipe expression
+	// и нужно разобрать выражение слева и справа от |
+	if currentToken.Type == lexer.TokenPipe || currentToken.Type == lexer.TokenBitwiseOr {
+		return h.parsePipeExpressionWithLeftAssociative(ctx)
+	}
 
 	// Проверяем, есть ли в потоке оператор | после текущего выражения
 	if !h.hasPipeOperatorInStream(tokenStream) {
@@ -62,7 +69,7 @@ func (h *PipeHandler) hasPipeOperatorInStream(stream stream.TokenStream) bool {
 	// Ищем оператор | в оставшейся части потока
 	for stream.HasMore() {
 		token := stream.Current()
-		if token.Type == lexer.TokenPipe {
+		if token.Type == lexer.TokenPipe || token.Type == lexer.TokenBitwiseOr {
 			return true
 		}
 		stream.Consume()
@@ -81,14 +88,14 @@ func (h *PipeHandler) isAssignmentWithPipeExpression(stream stream.TokenStream) 
 	// Пропускаем квалифицированную переменную слева
 	for stream.HasMore() {
 		token := stream.Current()
-		if token.Type == lexer.TokenAssign {
+		if token.Type == lexer.TokenAssign || token.Type == lexer.TokenColonEquals {
 			// Нашли знак присваивания, проверяем есть ли pipe expression после него
-			stream.Consume() // потребляем =
+			stream.Consume() // потребляем = или :=
 
 			// Ищем оператор | после присваивания
 			for stream.HasMore() {
 				token := stream.Current()
-				if token.Type == lexer.TokenPipe {
+				if token.Type == lexer.TokenPipe || token.Type == lexer.TokenBitwiseOr {
 					return true
 				}
 				stream.Consume()
@@ -108,25 +115,25 @@ func (h *PipeHandler) parseAssignmentWithPipeExpression(ctx *common.ParseContext
 	// Разбираем левую часть (квалифицированную переменную)
 	leftExpr, err := h.parseLeftSideOfAssignment(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse left side of assignment: %v", err)
+		return nil, newErrorWithPos(tokenStream, "failed to parse left side of assignment: %v", err)
 	}
 
 	// Потребляем знак присваивания
-	if !tokenStream.HasMore() || tokenStream.Current().Type != lexer.TokenAssign {
-		return nil, fmt.Errorf("expected '=' after variable")
+	if !tokenStream.HasMore() || (tokenStream.Current().Type != lexer.TokenAssign && tokenStream.Current().Type != lexer.TokenColonEquals) {
+		return nil, newErrorWithPos(tokenStream, "expected '=' or ':=' after variable")
 	}
 	assignToken := tokenStream.Consume()
 
 	// Разбираем pipe expression справа от знака присваивания
 	pipeExpr, err := h.parsePipeExpression(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse pipe expression in assignment: %v", err)
+		return nil, newErrorWithPos(tokenStream, "failed to parse pipe expression in assignment: %v", err)
 	}
 
 	// Создаем присваивание
 	identifier, ok := leftExpr.(*ast.Identifier)
 	if !ok {
-		return nil, fmt.Errorf("left side of assignment must be a qualified variable")
+		return nil, newErrorWithPos(tokenStream, "left side of assignment must be a qualified variable")
 	}
 
 	return ast.NewVariableAssignment(identifier, assignToken, pipeExpr), nil
@@ -137,24 +144,24 @@ func (h *PipeHandler) parseLeftSideOfAssignment(ctx *common.ParseContext) (ast.E
 	tokenStream := ctx.TokenStream
 
 	if !tokenStream.HasMore() {
-		return nil, fmt.Errorf("unexpected end of input")
+		return nil, newErrorWithPos(tokenStream, "unexpected end of input")
 	}
 
 	// Потребляем языковой токен
 	langToken := tokenStream.Consume()
 	if !langToken.IsLanguageIdentifierOrCallToken() {
-		return nil, fmt.Errorf("expected language token, got %s", langToken.Type)
+		return nil, newErrorWithTokenPos(langToken, "expected language token, got %s", langToken.Type)
 	}
 
 	// Проверяем наличие DOT
 	if !tokenStream.HasMore() || tokenStream.Current().Type != lexer.TokenDot {
-		return nil, fmt.Errorf("expected '.' after language token")
+		return nil, newErrorWithPos(tokenStream, "expected '.' after language token")
 	}
 	tokenStream.Consume() // потребляем DOT
 
 	// Проверяем наличие идентификатора переменной
 	if !tokenStream.HasMore() || tokenStream.Current().Type != lexer.TokenIdentifier {
-		return nil, fmt.Errorf("expected variable name after '.'")
+		return nil, newErrorWithPos(tokenStream, "expected variable name after '.'")
 	}
 	varToken := tokenStream.Consume()
 
@@ -175,36 +182,36 @@ func (h *PipeHandler) parsePipeExpression(ctx *common.ParseContext) (*ast.PipeEx
 	// Разбираем первое выражение
 	firstExpr, err := h.parseSingleExpression(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse first expression in pipe: %v", err)
+		return nil, newErrorWithPos(tokenStream, "failed to parse first expression in pipe: %v", err)
 	}
 	stages = append(stages, firstExpr)
 
 	// Разбираем последовательность | expr
-	for tokenStream.HasMore() && tokenStream.Current().Type == lexer.TokenPipe {
+	for tokenStream.HasMore() && (tokenStream.Current().Type == lexer.TokenPipe || tokenStream.Current().Type == lexer.TokenBitwiseOr) {
 		// Сохраняем оператор |
 		pipeToken := tokenStream.Consume()
 		operators = append(operators, pipeToken)
 
 		// Проверяем, что после pipe есть выражение
 		if !tokenStream.HasMore() {
-			return nil, fmt.Errorf("unexpected end of input after pipe operator")
+			return nil, newErrorWithPos(tokenStream, "unexpected end of input after pipe operator")
 		}
 
 		// Проверяем, что следующий токен может начинать выражение
 		if !h.isValidExpressionStart(tokenStream.Current()) {
-			return nil, fmt.Errorf("invalid expression start after pipe operator: %s", tokenStream.Current().Type)
+			return nil, newErrorWithTokenPos(tokenStream.Current(), "invalid expression start after pipe operator: %s", tokenStream.Current().Type)
 		}
 
 		// Разбираем следующее выражение
 		nextExpr, err := h.parseSingleExpression(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse expression after pipe: %v", err)
+			return nil, newErrorWithPos(tokenStream, "failed to parse expression after pipe: %v", err)
 		}
 		stages = append(stages, nextExpr)
 	}
 
 	if len(stages) < 2 {
-		return nil, fmt.Errorf("pipe expression must have at least 2 stages")
+		return nil, newErrorWithPos(tokenStream, "pipe expression must have at least 2 stages")
 	}
 
 	// Создаем PipeExpression
@@ -229,13 +236,13 @@ func (h *PipeHandler) parsePipeExpressionWithLeftAssociative(ctx *common.ParseCo
 	// Для этого мы должны вернуться назад и разобрать выражение до |
 	leftExpr, err := h.parseExpressionBeforePipe(ctx, pipeToken)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse expression before pipe: %v", err)
+		return nil, newErrorWithPos(tokenStream, "failed to parse expression before pipe: %v", err)
 	}
 
 	// Теперь разбираем выражение справа от |
 	rightExpr, err := h.parseExpressionAfterPipe(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse expression after pipe: %v", err)
+		return nil, newErrorWithPos(tokenStream, "failed to parse expression after pipe: %v", err)
 	}
 
 	// Создаем PipeExpression с двумя стадиями
@@ -258,17 +265,177 @@ func (h *PipeHandler) parseExpressionBeforePipe(ctx *common.ParseContext, pipeTo
 	// Возвращаемся к началу потока для разбора выражения слева
 	tokenStream.SetPosition(0)
 
-	// Создаем контекст для разбора выражения до |
-	exprCtx := &common.ParseContext{
-		TokenStream: tokenStream,
-		Parser:      ctx.Parser,
-		Depth:       ctx.Depth,
-		MaxDepth:    ctx.MaxDepth,
-		Guard:       ctx.Guard,
+	// Разбираем выражение до позиции pipeToken
+	return h.parseExpressionUntilPosition(ctx, pipeToken.Position)
+}
+
+// parseExpressionUntilPosition разбирает выражение до указанной позиции
+func (h *PipeHandler) parseExpressionUntilPosition(ctx *common.ParseContext, stopPos int) (ast.Expression, error) {
+	tokenStream := ctx.TokenStream
+
+	if !tokenStream.HasMore() {
+		return nil, newErrorWithPos(tokenStream, "unexpected end of input")
 	}
 
-	// Разбираем выражение до |
-	return h.parseSingleExpressionUntilPipe(exprCtx, pipeToken)
+	token := tokenStream.Current()
+
+	// Проверяем, не достигли ли мы стоп-позиции
+	if token.Position >= stopPos {
+		return nil, newErrorWithPos(tokenStream, "expected expression before pipe operator")
+	}
+
+	switch token.Type {
+	case lexer.TokenIdentifier:
+		// Это может быть language call или простой идентификатор
+		return h.parseLanguageCallOrIdentifierUntilPosition(ctx, stopPos)
+
+	case lexer.TokenString:
+		// Строковый литерал
+		strToken := tokenStream.Consume()
+		return &ast.StringLiteral{
+			Value: strToken.Value,
+			Pos: ast.Position{
+				Line:   strToken.Line,
+				Column: strToken.Column,
+				Offset: strToken.Position,
+			},
+		}, nil
+
+	case lexer.TokenNumber:
+		// Числовой литерал
+		numToken := tokenStream.Consume()
+		value, err := parseNumber(numToken.Value)
+		if err != nil {
+			return nil, newErrorWithTokenPos(numToken, "invalid number format: %s", numToken.Value)
+		}
+		return createNumberLiteral(numToken, value), nil
+
+	case lexer.TokenLeftParen:
+		// Сгруппированное выражение в скобках
+		return h.parseParenthesizedExpressionUntilPosition(ctx, stopPos)
+
+	default:
+		// Проверяем, является ли токен языковым токеном
+		if token.IsLanguageIdentifierOrCallToken() {
+			// Разбираем как language call или идентификатор
+			return h.parseLanguageCallOrIdentifierUntilPosition(ctx, stopPos)
+		}
+		return nil, newErrorWithTokenPos(token, "unsupported token type in pipe expression: %s", token.Type)
+	}
+}
+
+// parseLanguageCallOrIdentifierUntilPosition разбирает language call или идентификатор до указанной позиции
+func (h *PipeHandler) parseLanguageCallOrIdentifierUntilPosition(ctx *common.ParseContext, stopPos int) (ast.Expression, error) {
+	// Пробуем разобрать как language call вручную
+	return h.parseLanguageCallManuallyUntilPosition(ctx, stopPos)
+}
+
+// parseLanguageCallManuallyUntilPosition разбирает language call вручную до указанной позиции
+func (h *PipeHandler) parseLanguageCallManuallyUntilPosition(ctx *common.ParseContext, stopPos int) (ast.Expression, error) {
+	tokenStream := ctx.TokenStream
+
+	if !tokenStream.HasMore() {
+		return nil, newErrorWithPos(tokenStream, "unexpected end of input")
+	}
+
+	// Потребляем токен языка (имя языка)
+	langToken := tokenStream.Consume()
+	if !langToken.IsLanguageIdentifierOrCallToken() {
+		return nil, newErrorWithTokenPos(langToken, "expected language identifier")
+	}
+
+	// Проверяем наличие точки
+	if !tokenStream.HasMore() || tokenStream.Current().Type != lexer.TokenDot {
+		// Если нет точки, это просто идентификатор
+		return ast.NewIdentifier(langToken, langToken.Value), nil
+	}
+
+	// Потребляем точку
+	tokenStream.Consume()
+
+	// Проверяем наличие идентификатора функции
+	if !tokenStream.HasMore() || tokenStream.Current().Type != lexer.TokenIdentifier {
+		return nil, newErrorWithPos(tokenStream, "expected function identifier after dot")
+	}
+
+	// Потребляем идентификатор функции
+	funcToken := tokenStream.Consume()
+
+	// Проверяем наличие открывающей скобки
+	if !tokenStream.HasMore() || tokenStream.Current().Type != lexer.TokenLeftParen {
+		// Если нет скобок, это квалифицированное имя
+		qualifiedName := langToken.Value + "." + funcToken.Value
+		return ast.NewIdentifier(funcToken, qualifiedName), nil
+	}
+
+	// Потребляем открывающую скобку
+	tokenStream.Consume()
+
+	// Разбираем аргументы до закрывающей скобки или стоп-позиции
+	args := []ast.Expression{}
+
+	for tokenStream.HasMore() && tokenStream.Current().Type != lexer.TokenRightParen && tokenStream.Current().Position < stopPos {
+		// Пропускаем запятые между аргументами
+		if tokenStream.Current().Type == lexer.TokenComma {
+			tokenStream.Consume()
+			continue
+		}
+
+		// Разбираем аргумент
+		arg, err := h.parseExpressionUntilPosition(ctx, stopPos)
+		if err != nil {
+			return nil, newErrorWithPos(tokenStream, "failed to parse argument: %v", err)
+		}
+		args = append(args, arg)
+
+		// Проверяем, есть ли еще аргументы
+		if tokenStream.HasMore() && tokenStream.Current().Type == lexer.TokenComma {
+			tokenStream.Consume()
+			continue
+		}
+	}
+
+	// Проверяем закрывающую скобку
+	if !tokenStream.HasMore() || tokenStream.Current().Type != lexer.TokenRightParen {
+		return nil, newErrorWithPos(tokenStream, "expected ')' after arguments")
+	}
+	tokenStream.Consume() // Потребляем закрывающую скобку
+
+	// Создаем LanguageCall
+	pos := ast.Position{
+		Line:   langToken.Line,
+		Column: langToken.Column,
+		Offset: langToken.Position,
+	}
+
+	return &ast.LanguageCall{
+		Language:  langToken.Value,
+		Function:  funcToken.Value,
+		Arguments: args,
+		Pos:       pos,
+	}, nil
+}
+
+// parseParenthesizedExpressionUntilPosition разбирает выражение в скобках до указанной позиции
+func (h *PipeHandler) parseParenthesizedExpressionUntilPosition(ctx *common.ParseContext, stopPos int) (ast.Expression, error) {
+	tokenStream := ctx.TokenStream
+
+	// Потребляем открывающую скобку
+	tokenStream.Consume()
+
+	// Разбираем выражение внутри скобок до стоп-позиции
+	expr, err := h.parseExpressionUntilPosition(ctx, stopPos)
+	if err != nil {
+		return nil, newErrorWithPos(tokenStream, "failed to parse expression in parentheses: %v", err)
+	}
+
+	// Проверяем закрывающую скобку
+	if !tokenStream.HasMore() || tokenStream.Current().Type != lexer.TokenRightParen {
+		return nil, newErrorWithPos(tokenStream, "expected ')' after parenthesized expression")
+	}
+	tokenStream.Consume() // Потребляем закрывающую скобку
+
+	return expr, nil
 }
 
 // parseExpressionAfterPipe разбирает выражение, находящееся после оператора |
@@ -276,13 +443,13 @@ func (h *PipeHandler) parseExpressionAfterPipe(ctx *common.ParseContext) (ast.Ex
 	tokenStream := ctx.TokenStream
 
 	if !tokenStream.HasMore() {
-		return nil, fmt.Errorf("unexpected end of input after pipe operator")
+		return nil, newErrorWithPos(tokenStream, "unexpected end of input after pipe operator")
 	}
 
 	// Проверяем, что следующий токен может начинать выражение
 	nextToken := tokenStream.Current()
 	if !h.isValidExpressionStart(nextToken) {
-		return nil, fmt.Errorf("invalid token after pipe operator: %s", nextToken.Type)
+		return nil, newErrorWithTokenPos(nextToken, "invalid token after pipe operator: %s", nextToken.Type)
 	}
 
 	// Разбираем следующее выражение
@@ -294,14 +461,14 @@ func (h *PipeHandler) parseSingleExpressionUntilPipe(ctx *common.ParseContext, s
 	tokenStream := ctx.TokenStream
 
 	if !tokenStream.HasMore() {
-		return nil, fmt.Errorf("unexpected end of input")
+		return nil, newErrorWithPos(tokenStream, "unexpected end of input")
 	}
 
 	token := tokenStream.Current()
 
 	// Проверяем, не достигли ли мы оператора |
-	if token.Type == lexer.TokenPipe {
-		return nil, fmt.Errorf("expected expression before pipe operator")
+	if token.Type == lexer.TokenPipe || token.Type == lexer.TokenBitwiseOr {
+		return nil, newErrorWithPos(tokenStream, "expected expression before pipe operator")
 	}
 
 	switch token.Type {
@@ -324,16 +491,11 @@ func (h *PipeHandler) parseSingleExpressionUntilPipe(ctx *common.ParseContext, s
 	case lexer.TokenNumber:
 		// Числовой литерал
 		numToken := tokenStream.Consume()
-		numValue := 0.0
-		fmt.Sscanf(numToken.Value, "%f", &numValue)
-		return &ast.NumberLiteral{
-			Value: numValue,
-			Pos: ast.Position{
-				Line:   numToken.Line,
-				Column: numToken.Column,
-				Offset: numToken.Position,
-			},
-		}, nil
+		value, err := parseNumber(numToken.Value)
+		if err != nil {
+			return nil, newErrorWithTokenPos(numToken, "invalid number format: %s", numToken.Value)
+		}
+		return createNumberLiteral(numToken, value), nil
 
 	case lexer.TokenLeftParen:
 		// Сгруппированное выражение в скобках
@@ -345,7 +507,7 @@ func (h *PipeHandler) parseSingleExpressionUntilPipe(ctx *common.ParseContext, s
 			// Разбираем как language call или идентификатор
 			return h.parseLanguageCallOrIdentifierUntilPipe(ctx, stopAtPipe)
 		}
-		return nil, fmt.Errorf("unsupported token type in pipe expression: %s", token.Type)
+		return nil, newErrorWithTokenPos(token, "unsupported token type in pipe expression: %s", token.Type)
 	}
 }
 
@@ -360,13 +522,13 @@ func (h *PipeHandler) parseLanguageCallManuallyUntilPipe(ctx *common.ParseContex
 	tokenStream := ctx.TokenStream
 
 	if !tokenStream.HasMore() {
-		return nil, fmt.Errorf("unexpected end of input")
+		return nil, newErrorWithPos(tokenStream, "unexpected end of input")
 	}
 
 	// Потребляем токен языка (имя языка)
 	langToken := tokenStream.Consume()
 	if !langToken.IsLanguageIdentifierOrCallToken() {
-		return nil, fmt.Errorf("expected language identifier")
+		return nil, newErrorWithTokenPos(langToken, "expected language identifier")
 	}
 
 	// Проверяем наличие точки
@@ -380,7 +542,7 @@ func (h *PipeHandler) parseLanguageCallManuallyUntilPipe(ctx *common.ParseContex
 
 	// Проверяем наличие идентификатора функции
 	if !tokenStream.HasMore() || tokenStream.Current().Type != lexer.TokenIdentifier {
-		return nil, fmt.Errorf("expected function identifier after dot")
+		return nil, newErrorWithPos(tokenStream, "expected function identifier after dot")
 	}
 
 	// Потребляем идентификатор функции
@@ -399,7 +561,7 @@ func (h *PipeHandler) parseLanguageCallManuallyUntilPipe(ctx *common.ParseContex
 	// Разбираем аргументы до закрывающей скобки или |
 	args := []ast.Expression{}
 
-	for tokenStream.HasMore() && tokenStream.Current().Type != lexer.TokenRightParen && tokenStream.Current().Type != lexer.TokenPipe {
+	for tokenStream.HasMore() && tokenStream.Current().Type != lexer.TokenRightParen && tokenStream.Current().Type != lexer.TokenPipe && tokenStream.Current().Type != lexer.TokenBitwiseOr {
 		// Пропускаем запятые между аргументами
 		if tokenStream.Current().Type == lexer.TokenComma {
 			tokenStream.Consume()
@@ -409,14 +571,14 @@ func (h *PipeHandler) parseLanguageCallManuallyUntilPipe(ctx *common.ParseContex
 		// Разбираем аргумент
 		arg, err := h.parseSingleExpressionUntilPipe(ctx, stopAtPipe)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse argument: %v", err)
+			return nil, newErrorWithPos(tokenStream, "failed to parse argument: %v", err)
 		}
 		args = append(args, arg)
 	}
 
 	// Проверяем закрывающую скобку
 	if !tokenStream.HasMore() || tokenStream.Current().Type != lexer.TokenRightParen {
-		return nil, fmt.Errorf("expected ')' after arguments")
+		return nil, newErrorWithPos(tokenStream, "expected ')' after arguments")
 	}
 	tokenStream.Consume() // Потребляем закрывающую скобку
 
@@ -445,12 +607,12 @@ func (h *PipeHandler) parseParenthesizedExpressionUntilPipe(ctx *common.ParseCon
 	// Разбираем выражение внутри скобок до |
 	expr, err := h.parseSingleExpressionUntilPipe(ctx, stopAtPipe)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse expression in parentheses: %v", err)
+		return nil, newErrorWithPos(tokenStream, "failed to parse expression in parentheses: %v", err)
 	}
 
 	// Проверяем закрывающую скобку
 	if !tokenStream.HasMore() || tokenStream.Current().Type != lexer.TokenRightParen {
-		return nil, fmt.Errorf("expected ')' after parenthesized expression")
+		return nil, newErrorWithPos(tokenStream, "expected ')' after parenthesized expression")
 	}
 	tokenStream.Consume() // Потребляем закрывающую скобку
 
@@ -470,7 +632,7 @@ func (h *PipeHandler) hasPipeOperator(stream stream.TokenStream) bool {
 	}
 
 	// Проверяем, следующий токен - это |
-	if stream.HasMore() && stream.Current().Type == lexer.TokenPipe {
+	if stream.HasMore() && (stream.Current().Type == lexer.TokenPipe || stream.Current().Type == lexer.TokenBitwiseOr) {
 		return true
 	}
 
@@ -480,7 +642,7 @@ func (h *PipeHandler) hasPipeOperator(stream stream.TokenStream) bool {
 // skipExpression пропускает одно выражение в потоке
 func (h *PipeHandler) skipExpression(stream stream.TokenStream) error {
 	if !stream.HasMore() {
-		return fmt.Errorf("unexpected end of stream")
+		return newErrorWithPos(nil, "unexpected end of stream")
 	}
 
 	token := stream.Current()
@@ -494,7 +656,7 @@ func (h *PipeHandler) skipExpression(stream stream.TokenStream) error {
 		if stream.HasMore() && stream.Current().Type == lexer.TokenDot {
 			stream.Consume() // Пропускаем .
 			if !stream.HasMore() || stream.Current().Type != lexer.TokenIdentifier {
-				return fmt.Errorf("expected identifier after dot")
+				return newErrorWithPos(nil, "expected identifier after dot")
 			}
 			stream.Consume() // Пропускаем следующий идентификатор
 		}
@@ -513,7 +675,7 @@ func (h *PipeHandler) skipExpression(stream stream.TokenStream) error {
 				}
 			}
 			if parenCount != 0 {
-				return fmt.Errorf("unclosed parentheses")
+				return newErrorWithPos(nil, "unclosed parentheses")
 			}
 		}
 
@@ -537,7 +699,7 @@ func (h *PipeHandler) skipExpression(stream stream.TokenStream) error {
 			}
 		}
 		if parenCount != 0 {
-			return fmt.Errorf("unclosed parentheses")
+			return newErrorWithPos(nil, "unclosed parentheses")
 		}
 		return nil
 
@@ -551,7 +713,7 @@ func (h *PipeHandler) skipExpression(stream stream.TokenStream) error {
 			if stream.HasMore() && stream.Current().Type == lexer.TokenDot {
 				stream.Consume() // Пропускаем .
 				if !stream.HasMore() || stream.Current().Type != lexer.TokenIdentifier {
-					return fmt.Errorf("expected identifier after dot")
+					return newErrorWithPos(nil, "expected identifier after dot")
 				}
 				stream.Consume() // Пропускаем следующий идентификатор
 			}
@@ -570,13 +732,13 @@ func (h *PipeHandler) skipExpression(stream stream.TokenStream) error {
 					}
 				}
 				if parenCount != 0 {
-					return fmt.Errorf("unclosed parentheses")
+					return newErrorWithPos(nil, "unclosed parentheses")
 				}
 			}
 
 			return nil
 		}
-		return fmt.Errorf("unsupported expression start token: %s", token.Type)
+		return newErrorWithTokenPos(token, "unsupported expression start token: %s", token.Type)
 
 	}
 }
@@ -594,7 +756,7 @@ func (h *PipeHandler) parsePipeExpressionLeftAssociative(ctx *common.ParseContex
 	// Ищем начало первого выражения (перед первым |)
 	startPos := h.findExpressionStart(clone)
 	if startPos < 0 {
-		return nil, fmt.Errorf("could not find start of pipe expression")
+		return nil, newErrorWithPos(tokenStream, "could not find start of pipe expression")
 	}
 
 	// Возвращаемся к найденной позиции
@@ -651,12 +813,12 @@ func (h *PipeHandler) parsePipeSequence(ctx *common.ParseContext) (*ast.PipeExpr
 	// Разбираем первое выражение
 	firstExpr, err := h.parseSingleExpression(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse first expression in pipe: %v", err)
+		return nil, newErrorWithPos(tokenStream, "failed to parse first expression in pipe: %v", err)
 	}
 	stages = append(stages, firstExpr)
 
 	// Разбираем последовательность | expr
-	for tokenStream.HasMore() && tokenStream.Current().Type == lexer.TokenPipe {
+	for tokenStream.HasMore() && (tokenStream.Current().Type == lexer.TokenPipe || tokenStream.Current().Type == lexer.TokenBitwiseOr) {
 		// Сохраняем оператор |
 		pipeToken := tokenStream.Consume()
 		operators = append(operators, pipeToken)
@@ -664,13 +826,13 @@ func (h *PipeHandler) parsePipeSequence(ctx *common.ParseContext) (*ast.PipeExpr
 		// Разбираем следующее выражение
 		nextExpr, err := h.parseSingleExpression(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse expression after pipe: %v", err)
+			return nil, newErrorWithPos(tokenStream, "failed to parse expression after pipe: %v", err)
 		}
 		stages = append(stages, nextExpr)
 	}
 
 	if len(stages) < 2 {
-		return nil, fmt.Errorf("pipe expression must have at least 2 stages")
+		return nil, newErrorWithPos(tokenStream, "pipe expression must have at least 2 stages")
 	}
 
 	// Создаем PipeExpression
@@ -688,14 +850,14 @@ func (h *PipeHandler) parseSingleExpression(ctx *common.ParseContext) (ast.Expre
 	tokenStream := ctx.TokenStream
 
 	if !tokenStream.HasMore() {
-		return nil, fmt.Errorf("unexpected end of input in pipe expression")
+		return nil, newErrorWithPos(tokenStream, "unexpected end of input in pipe expression")
 	}
 
 	token := tokenStream.Current()
 
 	// Проверяем, что токен может начинать выражение
 	if !h.isValidExpressionStart(token) {
-		return nil, fmt.Errorf("invalid expression start token: %s", token.Type)
+		return nil, newErrorWithTokenPos(token, "invalid expression start token: %s", token.Type)
 	}
 
 	switch token.Type {
@@ -716,7 +878,7 @@ func (h *PipeHandler) parseSingleExpression(ctx *common.ParseContext) (ast.Expre
 		// Используем parseComplexExpression для разбора выражения
 		result, err := assignmentHandler.parseComplexExpression(tempCtx)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse complex expression in pipe: %v", err)
+			return nil, newErrorWithPos(tokenStream, "failed to parse complex expression in pipe: %v", err)
 		}
 
 		// В pipe expression всегда преобразуем QualifiedIdentifier в LanguageCall
@@ -751,7 +913,7 @@ func (h *PipeHandler) parseSingleExpression(ctx *common.ParseContext) (ast.Expre
 
 	case lexer.TokenNumber:
 		// Числовой литерал - НЕ разрешаем в pipe expression (только language calls и идентификаторы)
-		return nil, fmt.Errorf("numbers cannot be used as pipe stages, only language calls or identifiers")
+		return nil, newErrorWithTokenPos(token, "numbers cannot be used as pipe stages, only language calls or identifiers")
 
 	case lexer.TokenLeftParen:
 		// Сгруппированное выражение в скобках
@@ -763,7 +925,7 @@ func (h *PipeHandler) parseSingleExpression(ctx *common.ParseContext) (ast.Expre
 			// Разбираем как language call
 			return h.parseLanguageCallOrIdentifier(ctx)
 		}
-		return nil, fmt.Errorf("unsupported token type in pipe expression: %s", token.Type)
+		return nil, newErrorWithTokenPos(token, "unsupported token type in pipe expression: %s", token.Type)
 	}
 }
 
@@ -780,7 +942,7 @@ func (h *PipeHandler) isFollowedByPipeOperator(stream stream.TokenStream) bool {
 	}
 
 	// Проверяем, следующий токен - это |
-	if stream.HasMore() && stream.Current().Type == lexer.TokenPipe {
+	if stream.HasMore() && (stream.Current().Type == lexer.TokenPipe || stream.Current().Type == lexer.TokenBitwiseOr) {
 		return true
 	}
 
@@ -846,21 +1008,83 @@ func (h *PipeHandler) parseParenthesizedExpression(ctx *common.ParseContext) (as
 	tokenStream := ctx.TokenStream
 
 	// Потребляем открывающую скобку
-	tokenStream.Consume()
+	_ = tokenStream.Consume()
 
-	// Разбираем выражение внутри скобок
-	expr, err := h.parseSingleExpression(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse expression in parentheses: %v", err)
+	// Проверяем, есть ли внутри ТЕКУЩИХ скобок pipe expression (не считая вложенных)
+	if h.hasPipeOperatorInCurrentParentheses(tokenStream) {
+		// Если есть pipe operator внутри скобок, разбираем как pipe expression
+		pipeExpr, err := h.parsePipeExpression(ctx)
+		if err != nil {
+			return nil, newErrorWithPos(tokenStream, "failed to parse pipe expression in parentheses: %v", err)
+		}
+
+		// Проверяем закрывающую скобку
+		if !tokenStream.HasMore() || tokenStream.Current().Type != lexer.TokenRightParen {
+			return nil, newErrorWithPos(tokenStream, "expected ')' after pipe expression in parentheses")
+		}
+		_ = tokenStream.Consume() // Потребляем закрывающую скобку
+
+		// Возвращаем pipeExpr напрямую, так как ParenthesesNode не реализует Expression
+		// Скобки уже потреблены, так что просто возвращаем выражение внутри
+		return pipeExpr, nil
+	} else {
+		// Если нет pipe operator, разбираем как обычное выражение
+		expr, err := h.parseSingleExpression(ctx)
+		if err != nil {
+			return nil, newErrorWithPos(tokenStream, "failed to parse expression in parentheses: %v", err)
+		}
+
+		// Проверяем закрывающую скобку
+		if !tokenStream.HasMore() || tokenStream.Current().Type != lexer.TokenRightParen {
+			return nil, newErrorWithPos(tokenStream, "expected ')' after parenthesized expression")
+		}
+		_ = tokenStream.Consume() // Потребляем закрывающую скобку
+
+		// Возвращаем expr напрямую, так как ParenthesesNode не реализует Expression
+		// Скобки уже потреблены, так что просто возвращаем выражение внутри
+		return expr, nil
+	}
+}
+
+// hasPipeOperatorInCurrentParentheses проверяет, есть ли оператор | только до закрывающей скобки текущего уровня
+func (h *PipeHandler) hasPipeOperatorInCurrentParentheses(stream stream.TokenStream) bool {
+	// Сохраняем текущую позицию
+	currentPos := stream.Position()
+	defer stream.SetPosition(currentPos)
+
+	// Ищем | только до закрывающей скобки
+	for stream.HasMore() {
+		token := stream.Current()
+		
+		// Если встретили закрывающую скобку - остановились
+		if token.Type == lexer.TokenRightParen {
+			return false
+		}
+		
+		// Если встретили | - нашли pipe operator
+		if token.Type == lexer.TokenPipe || token.Type == lexer.TokenBitwiseOr {
+			return true
+		}
+		
+		// Если встретили открывающую скобку - пропустить всё до её закрывающей скобки
+		if token.Type == lexer.TokenLeftParen {
+			stream.Consume()
+			depth := 1
+			for stream.HasMore() && depth > 0 {
+				if stream.Current().Type == lexer.TokenLeftParen {
+					depth++
+				} else if stream.Current().Type == lexer.TokenRightParen {
+					depth--
+				}
+				stream.Consume()
+			}
+			continue
+		}
+		
+		stream.Consume()
 	}
 
-	// Проверяем закрывающую скобку
-	if !tokenStream.HasMore() || tokenStream.Current().Type != lexer.TokenRightParen {
-		return nil, fmt.Errorf("expected ')' after parenthesized expression")
-	}
-	tokenStream.Consume() // Потребляем закрывающую скобку
-
-	return expr, nil
+	return false
 }
 
 // Config возвращает конфигурацию обработчика

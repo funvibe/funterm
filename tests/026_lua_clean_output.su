@@ -1,0 +1,8 @@
+for i in [1,2,3] {
+    lua.print(i)
+}
+
+for i = 1,4 {
+    lua.loop_var = i * 100
+    lua.print("Loop iteration:", lua.loop_var)
+}

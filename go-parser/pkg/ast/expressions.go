@@ -29,7 +29,7 @@ func (be *BinaryExpression) Type() NodeType {
 
 // String возвращает строковое представление
 func (be *BinaryExpression) String() string {
-	return fmt.Sprintf("BinaryExpression(%s %s %s)", be.Left, be.Operator, be.Right)
+	return fmt.Sprintf("%s %s %s", be.Left, be.Operator, be.Right)
 }
 
 // ToMap преобразует узел в map для сериализации
@@ -282,5 +282,159 @@ func NewNamedArgument(name string, value Expression, pos Position) *NamedArgumen
 		Name:  name,
 		Value: value,
 		Pos:   pos,
+	}
+}
+
+// BuiltinFunctionCall представляет вызов builtin функции (без квалификатора языка)
+type BuiltinFunctionCall struct {
+	BaseNode
+	Function  string       // Имя функции (например, "id")
+	Arguments []Expression // Аргументы функции
+	Pos       Position
+}
+
+// expressionMarker реализует интерфейс Expression
+func (bfc *BuiltinFunctionCall) expressionMarker() {}
+
+// statementMarker реализует интерфейс Statement
+func (bfc *BuiltinFunctionCall) statementMarker() {}
+
+// Position возвращает позицию узла в коде
+func (bfc *BuiltinFunctionCall) Position() Position {
+	return bfc.Pos
+}
+
+// Type возвращает тип узла
+func (bfc *BuiltinFunctionCall) Type() NodeType {
+	return NodeInvalid // Используем NodeInvalid т.к. нет отдельного типа для builtin функции
+}
+
+// String возвращает строковое представление
+func (bfc *BuiltinFunctionCall) String() string {
+	return fmt.Sprintf("BuiltinFunctionCall(%s)", bfc.Function)
+}
+
+// ToMap преобразует узел в map для сериализации
+func (bfc *BuiltinFunctionCall) ToMap() map[string]interface{} {
+	args := make([]interface{}, len(bfc.Arguments))
+	for i, arg := range bfc.Arguments {
+		args[i] = arg.ToMap()
+	}
+	return map[string]interface{}{
+		"type":      "BuiltinFunctionCall",
+		"function":  bfc.Function,
+		"arguments": args,
+		"position":  bfc.Pos.ToMap(),
+	}
+}
+
+// NewBuiltinFunctionCall создает новый узел вызова builtin функции
+func NewBuiltinFunctionCall(function string, arguments []Expression, pos Position) *BuiltinFunctionCall {
+	return &BuiltinFunctionCall{
+		Function:  function,
+		Arguments: arguments,
+		Pos:       pos,
+	}
+}
+
+// NestedExpression - вложенное выражение в скобках (например, (a + b))
+type NestedExpression struct {
+	BaseNode
+	Inner Expression // Вложенное выражение
+	Pos   Position   // Позиция открывающей скобки
+}
+
+// expressionMarker реализует интерфейс Expression
+func (ne *NestedExpression) expressionMarker() {}
+
+// Position возвращает позицию узла в коде
+func (ne *NestedExpression) Position() Position {
+	return ne.Pos
+}
+
+// Type возвращает тип узла
+func (ne *NestedExpression) Type() NodeType {
+	return NodeParentheses
+}
+
+// String возвращает строковое представление
+func (ne *NestedExpression) String() string {
+	return fmt.Sprintf("(%s)", ne.Inner)
+}
+
+// ToMap преобразует узел в map для сериализации
+func (ne *NestedExpression) ToMap() map[string]interface{} {
+	return map[string]interface{}{
+		"type":     "NestedExpression",
+		"inner":    ne.Inner.ToMap(),
+		"position": ne.Pos.ToMap(),
+	}
+}
+
+// NewNestedExpression создает новый узел вложенного выражения
+func NewNestedExpression(inner Expression, pos Position) *NestedExpression {
+	return &NestedExpression{
+		Inner: inner,
+		Pos:   pos,
+	}
+}
+
+// ExpressionToString конвертирует Expression в строку для использования в funbit
+func ExpressionToString(expr Expression) (string, error) {
+	if expr == nil {
+		return "", fmt.Errorf("expression is nil")
+	}
+
+	switch e := expr.(type) {
+	case *BinaryExpression:
+		leftStr, err := ExpressionToString(e.Left)
+		if err != nil {
+			return "", err
+		}
+		rightStr, err := ExpressionToString(e.Right)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%s%s%s", leftStr, e.Operator, rightStr), nil
+
+	case *UnaryExpression:
+		rightStr, err := ExpressionToString(e.Right)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%s%s", e.Operator, rightStr), nil
+
+	case *NestedExpression:
+		innerStr, err := ExpressionToString(e.Inner)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("(%s)", innerStr), nil
+
+	case *Identifier:
+		return e.Name, nil
+
+	case *NumberLiteral:
+		if e.IsInt {
+			if e.IntValue != nil {
+				return e.IntValue.String(), nil
+			}
+			return "0", nil
+		} else {
+			return fmt.Sprintf("%f", e.FloatValue), nil
+		}
+
+	case *StringLiteral:
+		return e.Value, nil
+
+	case *BooleanLiteral:
+		if e.Value {
+			return "true", nil
+		}
+		return "false", nil
+
+	default:
+		// Для других типов выражений, пытаемся конвертировать в строку через ToMap()
+		return fmt.Sprintf("%T", expr), nil
 	}
 }

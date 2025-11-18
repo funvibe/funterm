@@ -1,0 +1,88 @@
+array_var = []
+int_var = 0
+str_var = ""
+lua (simple_var) {
+    simple_var = "local scope lua"
+}
+lua.print(lua.simple_var)
+lua.print(simple_var)
+
+to_print = len(array_var) + len(str_var) + int_var
+lua.print(to_print)
+array_var[int_var] = to_print
+str_var = str_var ++ to_print
+int_var = int_var + 1
+
+js (simple_var) {
+    simple_var = "local scope js"
+}
+js.print(js.simple_var)
+js.print(simple_var)
+
+to_print = len(array_var) + len(str_var) + int_var
+lua.print(to_print)
+array_var[int_var] = to_print
+str_var = str_var ++ to_print
+int_var = int_var + 1
+
+py (simple_var) {
+    simple_var = "local scope py"
+}
+py.print(py.simple_var)
+py.print(simple_var)
+
+to_print = len(array_var) + len(str_var) + int_var
+lua.print(to_print)
+
+// Edge case 1: Conflict local/global
+global_var = "global value"  // Unqualified global
+if (true) {
+    global_var = "global value changed"  // Should this overwrite global or be local?
+}
+lua.print(global_var)  // Should print "global value" if local didn't overwrite
+
+// Edge case 2: Type coercion
+num_var = 42  // Unqualified int
+lua.print(num_var + 0.5)  // Should coerce to float in Lua
+lua.print(num_var + 0.5)  // Should coerce to float in Lua
+js.print(num_var + 0.5)  // Should coerce to float in JS
+js.print(num_var + 0.5)  // Should coerce to float in JS
+py.print(num_var + 0.5)  // Should coerce to float in Python
+py.print(num_var + 0.5)  // Should coerce to float in Python
+
+// Edge case 3: Nested unqualified
+if (true) {
+    nested_var = "inside if"
+}
+lua.print(nested_var)  // Should be nil or error if not visible
+
+for i_n = 0,2 {
+    loop_var_n = "inside loop"
+}
+lua.print(loop_var_n)  // Should be nil
+lua.print(i_n)  // Should be nil
+
+for i_in in [1] {
+    loop_var_in = "inside loop"
+}
+lua.print(loop_var_in)  // Should be nil
+lua.print(i_in)  // Should be nil
+
+for i_c = 0; i_c < 1; i_c = i_c + 1 {
+    loop_var_c = "inside loop"
+}
+lua.print(loop_var_c)  // Should be nil
+lua.print(i_c)  // Should be nil
+
+i_g = 0
+for ; i_g < 5; i_g = i_g + 1 {
+    loop_var_cg = "inside loop"
+}
+lua.print(loop_var_cg)  // Should be nil
+lua.print(i_g)  // Should be 5
+
+// Edge case 4: Cross-runtime access
+cross_var = "global cross"
+lua.print(cross_var)  // Access without prefix
+js.print(cross_var)
+py.print(cross_var)

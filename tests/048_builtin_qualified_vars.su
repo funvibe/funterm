@@ -1,0 +1,34 @@
+# Test qualified variables in builtin functions
+lua.v = 345
+print(lua.v)
+id(lua.v)
+
+# Test with different types
+lua.str = "hello world"
+print(lua.str, lua.v)
+id(lua.str)
+
+# Test with numbers
+lua.num = 42.5
+print(lua.num)
+id(lua.num)
+
+# Test with boolean
+lua.flag = true
+print(lua.flag)
+id(lua.flag)
+
+# Test with arrays
+lua.arr = [1, 2, 3, 4, 5]
+print(lua.arr)
+id(lua.arr)
+
+# Test len function with qualified variables
+len(lua.arr)
+len(lua.str)
+
+# Test concat function with qualified variables
+ary1 = [1, 2, 3]
+ary2 = [4, 5, 6]
+lua.result = concat(ary1, ary2)
+print(lua.result)

@@ -143,6 +143,15 @@ func (f *TextFormatter) Format(entry *LogEntry) ([]byte, error) {
 	// Add the message
 	output += entry.Message
 
+	// Add position information if available
+	if line, ok := entry.Fields["line"].(int); ok {
+		if col, ok := entry.Fields["column"].(int); ok {
+			output += fmt.Sprintf(" (at line %d, col %d)", line, col)
+		} else {
+			output += fmt.Sprintf(" (at line %d)", line)
+		}
+	}
+
 	// Add caller if enabled
 	if f.IncludeCaller && entry.Caller != "" {
 		output += fmt.Sprintf(" (caller: %s)", entry.Caller)

@@ -37,6 +37,7 @@ type RecursionGuard interface {
 
 type ParseContext struct {
 	TokenStream        stream.TokenStream
+	Lexer              lexer.Lexer // Сохраняем ссылку на лексер для управления состоянием
 	Parser             Parser
 	Depth              int
 	MaxDepth           int

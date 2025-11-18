@@ -27,10 +27,7 @@ func NewHandlerFactory() *HandlerFactoryImpl {
 
 	// Регистрируем фабрики для разных типов конструкций
 	factory.RegisterFactory(common.ConstructLiteral, factory.createLiteralHandler)
-	factory.RegisterFactory(common.ConstructVariable, factory.createVariableHandler)
-	factory.RegisterFactory(common.ConstructTuple, factory.createTupleHandler)
 	factory.RegisterFactory(common.ConstructFunction, factory.createFunctionHandler)
-	factory.RegisterFactory(common.ConstructGroup, factory.createGroupHandler)
 	factory.RegisterFactory(common.ConstructArray, factory.createArrayHandler)
 	factory.RegisterFactory(common.ConstructObject, factory.createObjectHandler)
 	factory.RegisterFactory(common.ConstructAssignment, factory.createAssignmentHandler)
@@ -42,6 +39,8 @@ func NewHandlerFactory() *HandlerFactoryImpl {
 	factory.RegisterFactory(common.ConstructCodeBlock, factory.createCodeBlockHandler)
 	factory.RegisterFactory(common.ConstructBinaryExpression, factory.createTernaryHandler)
 	factory.RegisterFactory(common.ConstructMatch, factory.createMatchHandler)
+	factory.RegisterFactory(common.ConstructGroup, factory.createParenthesizedExpressionHandler)
+	factory.RegisterFactory(common.ConstructVariable, factory.createIdentifierReadHandler)
 
 	return factory
 }
@@ -71,31 +70,27 @@ func (f *HandlerFactoryImpl) CreateHandler(
 func (f *HandlerFactoryImpl) createLiteralHandler(
 	config config.ConstructHandlerConfig,
 ) (common.Handler, error) {
+	// Создаем обработчик литералов с настройками из конфигурации
+	priority := config.Priority
+	if priority == 0 {
+		priority = 95 // Высокий приоритет для литералов
+	}
+	order := config.Order
+	if order == 0 {
+		order = 1 // Порядок по умолчанию
+	}
+
+	// Обновляем приоритет и порядок в конфигурации
+	config.Priority = priority
+	config.Order = order
+
 	return NewLiteralHandler(config), nil
-}
-
-func (f *HandlerFactoryImpl) createVariableHandler(
-	config config.ConstructHandlerConfig,
-) (common.Handler, error) {
-	return NewVariableHandler(config), nil
-}
-
-func (f *HandlerFactoryImpl) createTupleHandler(
-	config config.ConstructHandlerConfig,
-) (common.Handler, error) {
-	return NewTupleHandler(config), nil
 }
 
 func (f *HandlerFactoryImpl) createFunctionHandler(
 	config config.ConstructHandlerConfig,
 ) (common.Handler, error) {
 	return NewFunctionHandler(config), nil
-}
-
-func (f *HandlerFactoryImpl) createGroupHandler(
-	config config.ConstructHandlerConfig,
-) (common.Handler, error) {
-	return NewGroupHandler(config), nil
 }
 
 func (f *HandlerFactoryImpl) createArrayHandler(
@@ -317,4 +312,24 @@ func (f *HandlerFactoryImpl) createMatchHandler(
 	config.Order = order
 
 	return NewMatchHandler(config), nil
+}
+
+func (f *HandlerFactoryImpl) createParenthesizedExpressionHandler(
+	config config.ConstructHandlerConfig,
+) (common.Handler, error) {
+	// Создаем обработчик выражений в скобках с настройками из конфигурации
+	priority := config.Priority
+	if priority == 0 {
+		priority = 120 // Самый высокий приоритет для скобок
+	}
+	order := config.Order
+	if order == 0 {
+		order = 1 // Порядок по умолчанию
+	}
+
+	// Обновляем приоритет и порядок в конфигурации
+	config.Priority = priority
+	config.Order = order
+
+	return NewParenthesizedExpressionHandler(config), nil
 }

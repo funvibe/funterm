@@ -1,0 +1,70 @@
+// Basic C-style for loop
+for (i = 0; i < 5; i = i+1) {
+    lua.print(i)
+}
+// Expected: 0\n1\n2\n3\n4
+
+i_g = 0
+for ; i_g < 3; i_g = i_g + 1 {
+    lua.print(i_g)
+}
+
+// Empty condition (infinite, but with break)
+for (j = 0; ; j = j+1) {
+    if (j >= 3) { break }
+    py.print(j)
+}
+// Expected: 0\n1\n2
+
+// Empty increment (manual in body)
+for (k = 0; k < 3; ) {
+    js.console.log(k)
+    k = k + 1
+}
+// Expected: 0\n1\n2
+
+// Scoping: init var visible after loop
+m = 0  // Global
+for (m = 0; m < 2; m = m + 1) {
+    lua.print(m)
+}
+lua.print("After:", m)  // Should be 2 (updated global)
+// Expected: 0\n1\nAfter: 2
+
+// Body scoping: var not visible after
+for (n = 0; n < 1; n = n + 1) {
+    local_var = "inside"
+}
+lua.print(local_var)  // Should be empty
+
+// Break and continue
+for (p = 0; p < 5; p = p + 1) {
+    if (p == 2) { continue }
+    if (p == 4) { break }
+    py.print(p)
+}
+// Expected: 0\n1\n3
+
+// Cross-runtime
+for (q = 0; q < 2; q = q + 1) {
+    py.print("Py:", q)
+    lua.print("Lua:", q)
+    js.console.log("JS:", q)
+}
+// Expected: Py: 0\nLua: 0\nJS: 0\nPy: 1\nLua: 1\nJS: 1
+
+// Unqualified in init/incr
+unqual = 5
+for (unqual = 0; unqual<2; unqual = unqual + 1) {
+    lua.print(unqual)
+}
+lua.print("After unqual:", unqual)  // Updated global
+// Expected: 0\n1\nAfter unqual: 2
+
+// Nested loops
+for (outer = 0; outer < 2; outer = outer + 1) {
+    for (inner = 0; inner < 2; inner = inner + 1) {
+        lua.print(outer ++ "-" ++ inner)
+    }
+}
+// Expected: 0-0\n0-1\n1-0\n1-1

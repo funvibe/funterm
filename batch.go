@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"funterm/factory"
 	"funterm/repl"
+	"funterm/shared"
 	"os"
 	"path/filepath"
 	"strings"
@@ -126,7 +127,7 @@ func executeFile(r *repl.REPL, language, filePath string) error {
 	// Выполняем весь файл сразу через метод ExecuteBatch для корректного вывода
 	err = runtime.ExecuteBatch(string(content))
 	if err != nil {
-		return fmt.Errorf("ошибка выполнения файла: %v", err)
+		return fmt.Errorf("script execution error: %v", err)
 	}
 
 	return nil
@@ -148,14 +149,18 @@ func executeMixedFile(r *repl.REPL, filePath string, verbose bool) error {
 
 	// Выполняем весь файл как единое целое через ExecutionEngine
 	// Это позволяет правильно обрабатывать многострочные конструкции как блоки кода
-	result, _, err := r.GetEngine().Execute(fileContent)
+	result, _, _, err := r.GetEngine().Execute(fileContent)
 	if err != nil {
-		return fmt.Errorf("ошибка выполнения файла: %v", err)
+		return fmt.Errorf("script execution error: %v", err)
 	}
 
 	// Выводим результат выполнения, если он не пустой
 	if result != nil && result != "" {
-		fmt.Printf("=> %v\n", result)
+		if preFormatted, ok := result.(*shared.PreFormattedResult); ok {
+			fmt.Printf("=> %s\n", preFormatted.Value)
+		} else {
+			fmt.Printf("=> %v\n", result)
+		}
 	}
 
 	if verbose {

@@ -1,0 +1,7 @@
+data = <<1:8,2:8>>
+match data {
+    <<result:1+1/binary>> -> {
+        lua.print("No error")
+    },
+    _ -> lua.print("No match")
+}

@@ -1,0 +1,11 @@
+# Test bitstring pattern matching in match blocks (should fail)
+data = <<0x89, 0x50, 0x4E, 0x47>>
+
+match data {
+    <<0x89, "PNG">> -> {
+        print("PNG detected")
+    }
+    _ -> {
+        print("Unknown format")
+    }
+}

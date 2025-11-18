@@ -10,6 +10,17 @@ import (
 	"go-parser/pkg/stream"
 )
 
+
+// isUnaryOperatorForIf проверяет, является ли токен унарным оператором (для IfHandler)
+func isUnaryOperatorForIf(tokenType lexer.TokenType) bool {
+	switch tokenType {
+	case lexer.TokenPlus, lexer.TokenMinus, lexer.TokenNot, lexer.TokenTilde, lexer.TokenAt:
+		return true
+	default:
+		return false
+	}
+}
+
 // IfHandler - обработчик if/else конструкций
 type IfHandler struct {
 	config  config.ConstructHandlerConfig
@@ -32,7 +43,7 @@ func NewIfHandlerWithVerbose(config config.ConstructHandlerConfig, verbose bool)
 // CanHandle проверяет, может ли обработчик обработать токен
 func (h *IfHandler) CanHandle(token lexer.Token) bool {
 	// Обрабатываем токен 'if'
-	return token.Type == 39 // TokenIf = 39 (реальное значение из отладки)
+	return token.Type == lexer.TokenIf
 }
 
 // Handle обрабатывает if/else конструкцию
@@ -51,13 +62,13 @@ func (h *IfHandler) Handle(ctx *common.ParseContext) (interface{}, error) {
 		fmt.Printf("DEBUG: IfHandler.Handle called with ifToken type %d, value '%s'\n", ifToken.Type, ifToken.Value)
 	}
 	if ifToken.Type != lexer.TokenIf {
-		return nil, fmt.Errorf("expected 'if', got %s", ifToken.Type)
+		return nil, newErrorWithTokenPos(ifToken, "expected 'if', got %s", ifToken.Type)
 	}
 
 	// 2. Проверяем структуру перед потреблением токенов
 	// If-конструкция: if (condition) { ... } [else { ... }]
 	if !tokenStream.HasMore() {
-		return nil, fmt.Errorf("expected '(' after 'if' - no more tokens")
+		return nil, newErrorWithTokenPos(ifToken, "expected '(' after 'if' - no more tokens")
 	}
 
 	// Потребляем 'if'
@@ -65,13 +76,15 @@ func (h *IfHandler) Handle(ctx *common.ParseContext) (interface{}, error) {
 
 	// 3. Проверяем наличие токена '(' (необязательный для синтаксиса без скобок)
 	var lParenToken lexer.Token
+	hasLeftParen := false
 	if tokenStream.HasMore() && tokenStream.Current().Type == lexer.TokenLeftParen {
 		lParenToken = tokenStream.Consume()
+		hasLeftParen = true
 	} else {
 		// Если скобок нет, создаем пустой токен для совместимости
 		lParenToken = lexer.Token{
 			Type:     lexer.TokenLeftParen,
-			Value:    "(",
+			Value:    "",
 			Position: ifToken.Position,
 			Line:     ifToken.Line,
 			Column:   ifToken.Column,
@@ -94,51 +107,84 @@ func (h *IfHandler) Handle(ctx *common.ParseContext) (interface{}, error) {
 
 	// 5. Проверяем и потребляем токен ')' (только если была открывающая скобка)
 	var rParenToken lexer.Token
-	if lParenToken.Value == "(" {
+	if hasLeftParen {
 		// Была открывающая скобка, значит должна быть и закрывающая
 		if !tokenStream.HasMore() || tokenStream.Current().Type != lexer.TokenRightParen {
-			return nil, fmt.Errorf("expected ')' after condition")
+			return nil, newErrorWithPos(tokenStream, "expected ')' after condition")
 		}
 		rParenToken = tokenStream.Consume()
+
+		// 6. Проверяем, есть ли продолжение выражения после ) (например, || !flag)
+		if tokenStream.HasMore() && isBinaryOperator(tokenStream.Current().Type) {
+			if h.verbose {
+				fmt.Printf("DEBUG: IfHandler found continuation after ), current token: %s (%s)\n", tokenStream.Current().Value, tokenStream.Current().Type)
+			}
+
+			// Используем BinaryExpressionHandler для парсинга полного выражения включая продолжение
+			binaryHandler := NewBinaryExpressionHandlerWithVerbose(config.ConstructHandlerConfig{}, h.verbose)
+			fullCondition, err := binaryHandler.ParseFullExpression(ctx, condition)
+			if err != nil {
+				if h.verbose {
+					fmt.Printf("DEBUG: IfHandler failed to parse continuation, error: %v\n", err)
+				}
+				return nil, fmt.Errorf("failed to parse condition continuation: %v", err)
+			}
+			condition = fullCondition
+		}
 	} else {
 		// Не было открывающей скобки, создаем пустой токен для совместимости
 		rParenToken = lexer.Token{
 			Type:     lexer.TokenRightParen,
-			Value:    ")",
+			Value:    "",
 			Position: ifToken.Position,
 			Line:     ifToken.Line,
 			Column:   ifToken.Column,
 		}
 	}
 
-	// 6. Проверяем и потребляем токен '{'
-	if !tokenStream.HasMore() || tokenStream.Current().Type != lexer.TokenLBrace {
-		return nil, fmt.Errorf("expected '{' after ')'")
-	}
-	lBraceToken := tokenStream.Consume()
+	// 6. Проверяем синтаксис тела if - поддерживаем C-стиль {...}
+	var bodyStartToken, bodyEndToken lexer.Token
+	var body []ast.Statement
 
-	// 7. Читаем тело if
-	body, err := h.parseIfBody(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse if body: %v", err)
-	}
+	if tokenStream.HasMore() && tokenStream.Current().Type == lexer.TokenLBrace {
+		// C-стиль: if (condition) { ... }
+		bodyStartToken = tokenStream.Consume()
 
-	// 8. Проверяем и потребляем токен '}'
-	if !tokenStream.HasMore() || tokenStream.Current().Type != lexer.TokenRBrace {
-		return nil, fmt.Errorf("expected '}' after if body")
+		// Читаем тело if
+		ifBody, err := h.parseIfBodyWithTerminator(ctx, lexer.TokenRBrace)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse if body: %v", err)
+		}
+		body = ifBody
+
+		// Проверяем и потребляем токен '}'
+		if !tokenStream.HasMore() || tokenStream.Current().Type != lexer.TokenRBrace {
+			return nil, newErrorWithPos(tokenStream, "expected '}' after if body")
+		}
+		bodyEndToken = tokenStream.Consume()
+
+	} else {
+		return nil, newErrorWithPos(tokenStream, "expected '{' after condition, got %s", tokenStream.Current().Type)
 	}
-	rBraceToken := tokenStream.Consume()
 
 	// 9. Создаем узел AST для if
-	blockStatement := ast.NewBlockStatement(lBraceToken, rBraceToken, body)
+	blockStatement := ast.NewBlockStatement(bodyStartToken, bodyEndToken, body)
 	ifNode := ast.NewIfStatement(ifToken, lParenToken, rParenToken, condition, blockStatement)
 
 	// 10. Проверяем наличие else
+	// Пропускаем пробелы и новые строки перед else
+	for tokenStream.HasMore() {
+		current := tokenStream.Current()
+		if current.Type == lexer.TokenNewline || current.Value == " " || current.Value == "\t" {
+			tokenStream.Consume()
+		} else {
+			break
+		}
+	}
+
 	if tokenStream.HasMore() && tokenStream.Current().Type == lexer.TokenElse {
 		// Потребляем 'else'
 		elseToken := tokenStream.Consume()
-
-		// Проверяем, что после 'else' идет - это 'if' (else if) или '{' (обычный else)
 		if tokenStream.HasMore() && tokenStream.Current().Type == lexer.TokenIf {
 			// Это конструкция 'else if'
 			// Парсим вложенный if как альтернативу
@@ -163,19 +209,19 @@ func (h *IfHandler) Handle(ctx *common.ParseContext) (interface{}, error) {
 			// Обычный else блок
 			// Проверяем и потребляем токен '{' для else
 			if !tokenStream.HasMore() || tokenStream.Current().Type != lexer.TokenLBrace {
-				return nil, fmt.Errorf("expected '{' after 'else'")
+				return nil, newErrorWithPos(tokenStream, "expected '{' after 'else'")
 			}
 			elseLBraceToken := tokenStream.Consume()
 
 			// Читаем тело else
-			elseBody, err := h.parseIfBody(ctx)
+			elseBody, err := h.parseIfBodyWithTerminator(ctx, lexer.TokenRBrace)
 			if err != nil {
 				return nil, fmt.Errorf("failed to parse else body: %v", err)
 			}
 
 			// Проверяем и потребляем токен '}' для else
 			if !tokenStream.HasMore() || tokenStream.Current().Type != lexer.TokenRBrace {
-				return nil, fmt.Errorf("expected '}' after else body")
+				return nil, newErrorWithPos(tokenStream, "expected '}' after else body")
 			}
 			elseRBraceToken := tokenStream.Consume()
 
@@ -197,13 +243,14 @@ func (h *IfHandler) parseConditionWithBinaryHandler(ctx *common.ParseContext) (a
 	}
 
 	if !tokenStream.HasMore() {
-		return nil, fmt.Errorf("unexpected EOF in condition")
+		return nil, newErrorWithPos(tokenStream, "unexpected EOF in condition")
 	}
 
 	// Добавляем отладочный вывод для проверки первого токена
 	if h.verbose {
 		fmt.Printf("DEBUG: parseConditionWithBinaryHandler first token type: %d, value: '%s'\n", tokenStream.Current().Type, tokenStream.Current().Value)
 	}
+
 
 	// Используем централизованный парсер выражений для правильной обработки приоритетов
 	expressionParser := NewUnifiedExpressionParser(h.verbose)
@@ -213,14 +260,32 @@ func (h *IfHandler) parseConditionWithBinaryHandler(ctx *common.ParseContext) (a
 	if h.verbose {
 		fmt.Printf("DEBUG: Checking complex expressions, firstToken type: %d, value: '%s'\n", firstToken.Type, firstToken.Value)
 	}
-	if firstToken.Type == lexer.TokenPython ||
+
+	// СПЕЦИАЛЬНАЯ ОБРАБОТКА: Если первый токен - унарный оператор, используем UnifiedExpressionParser напрямую
+	if isUnaryOperatorForIf(firstToken.Type) {
+		if h.verbose {
+			fmt.Printf("DEBUG: Found unary operator %s, using UnifiedExpressionParser directly\n", firstToken.Value)
+		}
+		return expressionParser.ParseExpression(ctx)
+	}
+
+	// Проверяем, является ли это языковым токеном или идентификатором, который может быть языком
+	isLanguageToken := firstToken.Type == lexer.TokenPython ||
 		firstToken.Type == lexer.TokenLua ||
 		firstToken.Type == lexer.TokenPy ||
 		firstToken.Type == lexer.TokenGo ||
 		firstToken.Type == lexer.TokenNode ||
-		firstToken.Type == lexer.TokenJS {
+		firstToken.Type == lexer.TokenJS
+
+	// Также проверяем идентификаторы, которые могут быть именами языков
+	isLanguageIdentifier := firstToken.Type == lexer.TokenIdentifier &&
+		(firstToken.Value == "python" || firstToken.Value == "lua" || firstToken.Value == "py" ||
+			firstToken.Value == "go" || firstToken.Value == "node" || firstToken.Value == "js" ||
+			firstToken.Value == "javascript")
+
+	if isLanguageToken || isLanguageIdentifier {
 		if h.verbose {
-			fmt.Printf("DEBUG: First token is language token, checking for DOT\n")
+			fmt.Printf("DEBUG: First token is language token or identifier, checking for DOT\n")
 		}
 		// Проверяем, не является ли это вызовом функции с точкой (python.check_status()) или доступом к элементу массива/словаря
 		if tokenStream.Peek().Type == lexer.TokenDot {
@@ -310,15 +375,13 @@ func (h *IfHandler) parseConditionWithBinaryHandler(ctx *common.ParseContext) (a
 		}
 	}
 
-	// НОВАЯ ЦЕНТРАЛИЗОВАННАЯ ЛОГИКА: Всегда используем UnifiedExpressionParser
+	// Для всех остальных случаев используем UnifiedExpressionParser
 	result, err := expressionParser.ParseExpression(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse condition: %v", err)
 	}
 
 	return result, nil
-
-	// СТАРАЯ ЛОГИКА (закомментирована для безопасности)
 	/*
 			var leftExpr ast.Expression
 			if h.verbose {
@@ -412,7 +475,8 @@ func (h *IfHandler) parseConditionWithBinaryHandler(ctx *common.ParseContext) (a
 				// Числовой литерал
 				tokenStream.Consume()
 				leftExpr = &ast.NumberLiteral{
-					Value: parseFloat(firstToken.Value),
+					FloatValue: parseFloat(firstToken.Value),
+					IsInt:      false,
 					Pos: ast.Position{
 						Line:   firstToken.Line,
 						Column: firstToken.Column,
@@ -560,7 +624,8 @@ func (h *IfHandler) parseConditionWithBinaryHandler(ctx *common.ParseContext) (a
 				// Числовой литерал
 				tokenStream.Consume()
 				return &ast.NumberLiteral{
-					Value: parseFloat(token.Value),
+					FloatValue: parseFloat(token.Value),
+					IsInt:      false,
 					Pos: ast.Position{
 						Line:   token.Line,
 						Column: token.Column,
@@ -574,12 +639,14 @@ func (h *IfHandler) parseConditionWithBinaryHandler(ctx *common.ParseContext) (a
 	*/
 }
 
-// parseIfBody парсит тело if/else
-func (h *IfHandler) parseIfBody(ctx *common.ParseContext) ([]ast.Statement, error) {
+// parseIfBodyWithTerminator парсит тело if/else с указанным терминатором
+func (h *IfHandler) parseIfBodyWithTerminator(ctx *common.ParseContext, terminator lexer.TokenType) ([]ast.Statement, error) {
 	tokenStream := ctx.TokenStream
 	body := make([]ast.Statement, 0)
 
-	// Пропускаем пробелы после '{'
+	braceLevel := 0 // Уровень вложенности скобок
+
+	// Пропускаем пробелы после '{' или 'then'
 	for tokenStream.HasMore() {
 		current := tokenStream.Current()
 
@@ -587,9 +654,16 @@ func (h *IfHandler) parseIfBody(ctx *common.ParseContext) ([]ast.Statement, erro
 			break
 		}
 
-		// Если встречаем '}', заканчиваем тело
-		if current.Type == lexer.TokenRBrace {
-			break
+		// Учитываем вложенность скобок
+		if current.Type == lexer.TokenLBrace {
+			braceLevel++
+		} else if current.Type == terminator {
+			// Если мы на top level (braceLevel == 0), это наш terminator
+			if braceLevel == 0 {
+				break
+			} else {
+				braceLevel--
+			}
 		}
 
 		// Если встречаем 'if', это вложенный if
@@ -691,7 +765,7 @@ func (h *IfHandler) parseIfBody(ctx *common.ParseContext) ([]ast.Statement, erro
 							fmt.Printf("DEBUG: parseIfBody - language call parsing failed: %v\n", err)
 						}
 					}
-				} else if peek2.Type == lexer.TokenIdentifier && tokenStream.PeekN(3).Type == lexer.TokenAssign {
+				} else if peek2.Type == lexer.TokenIdentifier && (tokenStream.PeekN(3).Type == lexer.TokenAssign || tokenStream.PeekN(3).Type == lexer.TokenColonEquals) {
 					if h.verbose {
 						fmt.Printf("DEBUG: parseIfBody - detected qualified assignment pattern\n")
 					}
@@ -717,7 +791,7 @@ func (h *IfHandler) parseIfBody(ctx *common.ParseContext) ([]ast.Statement, erro
 
 			// Проверяем, не является ли это присваиванием (смотрим на следующий токен)
 			peekForAssign := tokenStream.Peek()
-			if peekForAssign.Type == lexer.TokenAssign {
+			if peekForAssign.Type == lexer.TokenAssign || peekForAssign.Type == lexer.TokenColonEquals {
 				if h.verbose {
 					fmt.Printf("DEBUG: parseIfBody - found ASSIGN after %s, trying to parse assignment\n", current.Value)
 				}
@@ -762,6 +836,29 @@ func (h *IfHandler) parseIfBody(ctx *common.ParseContext) ([]ast.Statement, erro
 			}
 		}
 
+		// Проверяем, не является ли это вызовом builtin функции
+		if current.Type == lexer.TokenIdentifier && tokenStream.Peek().Type == lexer.TokenLeftParen {
+			if h.verbose {
+				fmt.Printf("DEBUG: parseIfBody - found identifier followed by '(', trying builtin function\n")
+			}
+			// Это может быть builtin функция типа print(...)
+			builtinHandler := NewBuiltinFunctionHandlerWithVerbose(config.ConstructHandlerConfig{}, h.verbose)
+			result, err := builtinHandler.Handle(ctx)
+			if err == nil {
+				if h.verbose {
+					fmt.Printf("DEBUG: parseIfBody - builtin function parsing succeeded\n")
+				}
+				if builtinCall, ok := result.(*ast.BuiltinFunctionCall); ok {
+					body = append(body, builtinCall)
+					continue
+				}
+			} else {
+				if h.verbose {
+					fmt.Printf("DEBUG: parseIfBody - builtin function parsing failed: %v\n", err)
+				}
+			}
+		}
+
 		// Если не смогли распарсить, пропускаем токен
 		tokenStream.Consume()
 	}
@@ -791,20 +888,20 @@ func (h *IfHandler) parseLanguageCall(tokenStream stream.TokenStream) (*ast.Lang
 
 	// Проверяем и потребляем DOT
 	if !tokenStream.HasMore() || tokenStream.Current().Type != lexer.TokenDot {
-		return nil, fmt.Errorf("expected DOT after language '%s'", language)
+		return nil, newErrorWithTokenPos(languageToken, "expected DOT after language '%s'", language)
 	}
 	tokenStream.Consume() // Consuming dot
 
 	// Читаем имя функции
 	if !tokenStream.HasMore() || tokenStream.Current().Type != lexer.TokenIdentifier {
-		return nil, fmt.Errorf("expected function name after DOT")
+		return nil, newErrorWithTokenPos(tokenStream.Current(), "expected function name after DOT")
 	}
 	functionToken := tokenStream.Consume()
 	functionName := functionToken.Value
 
 	// Проверяем и потребляем открывающую скобку
 	if !tokenStream.HasMore() || tokenStream.Current().Type != lexer.TokenLeftParen {
-		return nil, fmt.Errorf("expected '(' after function name '%s'", functionName)
+		return nil, newErrorWithTokenPos(functionToken, "expected '(' after function name '%s'", functionName)
 	}
 	tokenStream.Consume() // Consuming '('
 
@@ -812,14 +909,14 @@ func (h *IfHandler) parseLanguageCall(tokenStream stream.TokenStream) (*ast.Lang
 	arguments := make([]ast.Expression, 0)
 
 	if !tokenStream.HasMore() {
-		return nil, fmt.Errorf("unexpected EOF after '('")
+		return nil, newErrorWithTokenPos(tokenStream.Current(), "unexpected EOF after '('")
 	}
 
 	if tokenStream.Current().Type != lexer.TokenRightParen {
 		// Есть хотя бы один аргумент
 		for {
 			if !tokenStream.HasMore() {
-				return nil, fmt.Errorf("unexpected EOF in arguments")
+				return nil, newErrorWithTokenPos(tokenStream.Current(), "unexpected EOF in arguments")
 			}
 
 			// Читаем аргумент
@@ -837,19 +934,16 @@ func (h *IfHandler) parseLanguageCall(tokenStream stream.TokenStream) (*ast.Lang
 					},
 				}
 			case lexer.TokenNumber:
-				arg = &ast.NumberLiteral{
-					Value: parseFloat(argToken.Value),
-					Pos: ast.Position{
-						Line:   argToken.Line,
-						Column: argToken.Column,
-						Offset: argToken.Position,
-					},
+				numValue, err := parseNumber(argToken.Value)
+				if err != nil {
+					return nil, newErrorWithTokenPos(argToken, "invalid number format: %s", argToken.Value)
 				}
+				arg = createNumberLiteral(argToken, numValue)
 			case lexer.TokenIdentifier:
 				// Простой идентификатор (например, локальная переменная из pattern matching)
 				arg = ast.NewIdentifier(argToken, argToken.Value)
 			default:
-				return nil, fmt.Errorf("unsupported argument type: %s", argToken.Type)
+				return nil, newErrorWithTokenPos(argToken, "unsupported argument type: %s", argToken.Type)
 			}
 
 			arguments = append(arguments, arg)
@@ -865,22 +959,22 @@ func (h *IfHandler) parseLanguageCall(tokenStream stream.TokenStream) (*ast.Lang
 				tokenStream.Consume() // Consuming comma
 				// После запятой должен быть аргумент
 				if !tokenStream.HasMore() {
-					return nil, fmt.Errorf("unexpected EOF after comma")
+					return nil, newErrorWithTokenPos(tokenStream.Current(), "unexpected EOF after comma")
 				}
 				if tokenStream.Current().Type == lexer.TokenRightParen {
-					return nil, fmt.Errorf("unexpected ')' after comma")
+					return nil, newErrorWithTokenPos(tokenStream.Current(), "unexpected ')' after comma")
 				}
 			} else if nextToken.Type == lexer.TokenRightParen {
 				break
 			} else {
-				return nil, fmt.Errorf("expected ',' or ')' after argument, got %s", nextToken.Type)
+				return nil, newErrorWithTokenPos(nextToken, "expected ',' or ')' after argument, got %s", nextToken.Type)
 			}
 		}
 	}
 
 	// Проверяем закрывающую скобку
 	if !tokenStream.HasMore() || tokenStream.Current().Type != lexer.TokenRightParen {
-		return nil, fmt.Errorf("expected ')' after arguments")
+		return nil, newErrorWithTokenPos(tokenStream.Current(), "expected ')' after arguments")
 	}
 	tokenStream.Consume() // Consuming ')'
 

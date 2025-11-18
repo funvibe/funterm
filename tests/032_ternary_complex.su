@@ -1,0 +1,11 @@
+score = 90
+grade = score >= 80 ? "A" : score >= 70 ? "B" : "C"
+lua.print(grade)
+
+score = 75
+grade = score >= 80 ? "A" : score >= 70 ? "B" : "C"
+lua.print(grade)
+
+score = 50
+grade = score >= 80 ? "A" : score >= 70 ? "B" : "C"
+lua.print(grade)

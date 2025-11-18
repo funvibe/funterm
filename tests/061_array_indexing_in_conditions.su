@@ -1,0 +1,8 @@
+# Test array indexing in conditions (should fail)
+data = [1, 2, 3, 4, 5]
+
+if data[0] == 1 {
+    print("First element is 1")
+} else {
+    print("First element is not 1")
+}

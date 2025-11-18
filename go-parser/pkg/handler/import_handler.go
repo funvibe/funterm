@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"fmt"
 	"go-parser/pkg/ast"
 	"go-parser/pkg/common"
 	"go-parser/pkg/config"
@@ -32,13 +31,13 @@ func (h *ImportHandler) Handle(ctx *common.ParseContext) (interface{}, error) {
 	// Потребляем токен import
 	importToken := tokenStream.Current()
 	if importToken.Type != lexer.TokenImport {
-		return nil, fmt.Errorf("expected import token, got %s", importToken.Type)
+		return nil, newErrorWithTokenPos(importToken, "expected import token, got %s", importToken.Type)
 	}
 	tokenStream.Consume()
 
 	// Пропускаем пробелы после import
 	if !tokenStream.HasMore() {
-		return nil, fmt.Errorf("unexpected EOF after import")
+		return nil, newErrorWithPos(tokenStream, "unexpected EOF after import")
 	}
 	current := tokenStream.Current()
 
@@ -49,18 +48,18 @@ func (h *ImportHandler) Handle(ctx *common.ParseContext) (interface{}, error) {
 		runtimeToken = current
 		tokenStream.Consume()
 	default:
-		return nil, fmt.Errorf("expected runtime specifier (lua, python, py, node) after import, got %s", current.Type)
+		return nil, newErrorWithTokenPos(current, "expected runtime specifier (lua, python, py, node) after import, got %s", current.Type)
 	}
 
 	// Пропускаем пробелы после рантайма
 	if !tokenStream.HasMore() {
-		return nil, fmt.Errorf("unexpected EOF after runtime specifier")
+		return nil, newErrorWithPos(tokenStream, "unexpected EOF after runtime specifier")
 	}
 	current = tokenStream.Current()
 
 	// Ожидаем строковый литерал с путем к файлу
 	if current.Type != lexer.TokenString {
-		return nil, fmt.Errorf("expected string literal with file path after runtime, got %s", current.Type)
+		return nil, newErrorWithTokenPos(current, "expected string literal with file path after runtime, got %s", current.Type)
 	}
 
 	// Создаем строковый литерал для пути

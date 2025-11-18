@@ -5,23 +5,26 @@ type Lexer interface {
 	Peek() Token
 	HasMore() bool
 	Position() int
+	SetInSizeExpression(bool)
 }
 
 type SimpleLexer struct {
-	input          string
-	position       int
-	current        rune
-	line           int
-	column         int
-	shebangChecked bool
+	input            string
+	position         int
+	current          rune
+	line             int
+	column           int
+	shebangChecked   bool
+	inSizeExpression bool
 }
 
 func NewLexer(input string) *SimpleLexer {
 	l := &SimpleLexer{
-		input:          input,
-		line:           1,
-		column:         0,
-		shebangChecked: false,
+		input:            input,
+		line:             1,
+		column:           0,
+		shebangChecked:   false,
+		inSizeExpression: false,
 	}
 	l.readChar()
 	return l
@@ -166,6 +169,14 @@ func (l *SimpleLexer) NextToken() Token {
 		l.readChar()
 		return token
 	case ':':
+		// Проверяем на := (mutable assignment)
+		if l.peekChar() == '=' {
+			l.readChar() // потребляем '='
+			token.Type = TokenColonEquals
+			token.Value = ":="
+			l.readChar()
+			return token
+		}
 		token.Type = TokenColon
 		token.Value = ":"
 		l.readChar()
@@ -195,6 +206,14 @@ func (l *SimpleLexer) NextToken() Token {
 		l.readChar()
 		return token
 	case '|':
+		// Проверяем на |> (pipe operator)
+		if l.peekChar() == '>' {
+			l.readChar() // потребляем '>'
+			token.Type = TokenPipe
+			token.Value = "|>"
+			l.readChar()
+			return token
+		}
 		// Проверяем на ||
 		if l.peekChar() == '|' {
 			l.readChar() // потребляем второй '|'
@@ -203,7 +222,7 @@ func (l *SimpleLexer) NextToken() Token {
 			l.readChar()
 			return token
 		}
-		token.Type = TokenPipe
+		token.Type = TokenBitwiseOr
 		token.Value = "|"
 		l.readChar()
 		return token
@@ -238,6 +257,11 @@ func (l *SimpleLexer) NextToken() Token {
 		token.Value = "~"
 		l.readChar()
 		return token
+	case '^':
+		token.Type = TokenCaret
+		token.Value = "^"
+		l.readChar()
+		return token
 	case '+':
 		// Проверяем на ++
 		if l.peekChar() == '+' {
@@ -265,6 +289,14 @@ func (l *SimpleLexer) NextToken() Token {
 		l.readChar()
 		return token
 	case '*':
+		// Проверяем на ** (exponentiation)
+		if l.peekChar() == '*' {
+			l.readChar() // потребляем второй '*'
+			token.Type = TokenPower
+			token.Value = "**"
+			l.readChar()
+			return token
+		}
 		token.Type = TokenMultiply
 		token.Value = "*"
 		l.readChar()
@@ -347,6 +379,11 @@ func (l *SimpleLexer) HasMore() bool {
 
 func (l *SimpleLexer) Position() int {
 	return l.position - 1
+}
+
+// SetInSizeExpression устанавливает флаг контекста size expression
+func (l *SimpleLexer) SetInSizeExpression(inSizeExpr bool) {
+	l.inSizeExpression = inSizeExpr
 }
 
 func (l *SimpleLexer) skipWhitespace() {
@@ -451,7 +488,7 @@ func isLetter(ch rune) bool {
 }
 
 func isLetterOrDigit(ch rune) bool {
-	return isLetter(ch) || (ch >= '0' && ch <= '9') || ch == '-' || ch == '_'
+	return isLetter(ch) || (ch >= '0' && ch <= '9') || ch == '_' || ch == '-'
 }
 
 func isDigit(ch rune) bool {
@@ -480,9 +517,17 @@ func (l *SimpleLexer) readIdentifier() Token {
 	}
 	l.readChar()
 
-	// Последующие символы могут быть буквами или цифрами
-	for isLetterOrDigit(l.current) {
-		l.readChar()
+	// В режиме size expression не включаем дефис в идентификаторы
+	if l.inSizeExpression {
+		// Последующие символы могут быть буквами, цифрами или подчеркиванием (без дефиса)
+		for isLetter(l.current) || isDigit(l.current) || l.current == '_' {
+			l.readChar()
+		}
+	} else {
+		// Последующие символы могут быть буквами, цифрами, подчеркиванием или дефисом
+		for isLetterOrDigit(l.current) {
+			l.readChar()
+		}
 	}
 
 	identifier := l.input[startPos : l.position-1]
@@ -500,22 +545,6 @@ func (l *SimpleLexer) readIdentifier() Token {
 	case "in":
 		return Token{
 			Type:     TokenIn,
-			Value:    identifier,
-			Position: startPos,
-			Line:     startLine,
-			Column:   startCol,
-		}
-	case "do":
-		return Token{
-			Type:     TokenDo,
-			Value:    identifier,
-			Position: startPos,
-			Line:     startLine,
-			Column:   startCol,
-		}
-	case "end":
-		return Token{
-			Type:     TokenEnd,
 			Value:    identifier,
 			Position: startPos,
 			Line:     startLine,
@@ -642,6 +671,14 @@ func (l *SimpleLexer) readIdentifier() Token {
 			Line:     startLine,
 			Column:   startCol,
 		}
+	case "nil":
+		return Token{
+			Type:     TokenNil,
+			Value:    identifier,
+			Position: startPos,
+			Line:     startLine,
+			Column:   startCol,
+		}
 	default:
 		return Token{
 			Type:     TokenIdentifier,
@@ -672,7 +709,7 @@ func (l *SimpleLexer) readIdentifierWithUnderscore() Token {
 	l.readChar()
 
 	// Последующие символы могут быть буквами, цифрами или подчеркиваниями
-	for isLetter(rune(l.input[l.position])) || isDigit(rune(l.input[l.position])) || rune(l.input[l.position]) == '_' || rune(l.input[l.position]) == '-' {
+	for isLetter(rune(l.input[l.position])) || isDigit(rune(l.input[l.position])) || rune(l.input[l.position]) == '_' {
 		l.readChar()
 		if l.position >= len(l.input) {
 			break
@@ -716,6 +753,25 @@ func (l *SimpleLexer) readNumber() Token {
 		}
 	}
 
+	// Проверяем на двоичное число (0b или 0B)
+	if l.current == '0' && (l.peekChar() == 'b' || l.peekChar() == 'B') {
+		l.readChar() // потребляем '0'
+		l.readChar() // потребляем 'b' или 'B'
+
+		// Читаем двоичные цифры (только 0 и 1)
+		for l.current == '0' || l.current == '1' {
+			l.readChar()
+		}
+
+		return Token{
+			Type:     TokenNumber,
+			Value:    l.input[startPos : l.position-1],
+			Position: startPos,
+			Line:     startLine,
+			Column:   startCol,
+		}
+	}
+
 	for isDigit(l.current) {
 		l.readChar()
 	}
@@ -723,6 +779,34 @@ func (l *SimpleLexer) readNumber() Token {
 	// Проверяем на десятичную точку
 	if l.current == '.' {
 		l.readChar()
+		for isDigit(l.current) {
+			l.readChar()
+		}
+	}
+
+	// Проверяем на научную нотацию (e или E)
+	if l.current == 'e' || l.current == 'E' {
+		l.readChar() // потребляем 'e' или 'E'
+
+		// Проверяем на знак экспоненты (+ или -)
+		if l.current == '+' || l.current == '-' {
+			l.readChar() // потребляем знак
+		}
+
+		// Должна быть хотя бы одна цифра в экспоненте
+		if !isDigit(l.current) {
+			// Если после e/E (и возможного знака) нет цифры, это ошибка
+			// Но для простоты вернем то что уже прочитали
+			return Token{
+				Type:     TokenNumber,
+				Value:    l.input[startPos : l.position-1],
+				Position: startPos,
+				Line:     startLine,
+				Column:   startCol,
+			}
+		}
+
+		// Читаем цифры экспоненты
 		for isDigit(l.current) {
 			l.readChar()
 		}

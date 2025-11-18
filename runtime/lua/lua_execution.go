@@ -32,11 +32,31 @@ func (lr *LuaRuntime) ExecuteFunction(name string, args []interface{}) (interfac
 	// Get the function from Lua state
 	var fn lua.LValue
 	if len(parts) == 1 {
-		// Global function
-		fn = lr.state.GetGlobal(parts[0])
+		// First check runtimeObjects for functions saved from code blocks
+		if obj, exists := lr.runtimeObjects[parts[0]]; exists {
+			// Convert the stored object to Lua value
+			luaValue, err := lr.GoToLua(obj)
+			if err != nil {
+				return nil, errors.NewRuntimeError("lua", "LUA_VALUE_CONVERSION_ERROR", fmt.Sprintf("function conversion error: %v", err))
+			}
+			fn = luaValue
+		} else {
+			// Global function
+			fn = lr.state.GetGlobal(parts[0])
+		}
 	} else {
-		// Nested function (e.g., math.sin)
-		current := lr.state.GetGlobal(parts[0])
+		// Nested function (e.g., math.sin) - check runtimeObjects first for the first part
+		var current lua.LValue
+		if obj, exists := lr.runtimeObjects[parts[0]]; exists {
+			luaValue, err := lr.GoToLua(obj)
+			if err != nil {
+				return nil, errors.NewRuntimeError("lua", "LUA_VALUE_CONVERSION_ERROR", fmt.Sprintf("function conversion error: %v", err))
+			}
+			current = luaValue
+		} else {
+			current = lr.state.GetGlobal(parts[0])
+		}
+
 		for i := 1; i < len(parts)-1; i++ {
 			if current.Type() != lua.LTTable {
 				return nil, errors.NewRuntimeError("lua", "LUA_NOT_A_TABLE", fmt.Sprintf("'%s' is not a table", strings.Join(parts[:i], ".")))
@@ -136,11 +156,31 @@ func (lr *LuaRuntime) ExecuteFunctionMultiple(functionName string, args ...inter
 	// Get the function from Lua state
 	var fn lua.LValue
 	if len(parts) == 1 {
-		// Global function
-		fn = lr.state.GetGlobal(parts[0])
+		// First check runtimeObjects for functions saved from code blocks
+		if obj, exists := lr.runtimeObjects[parts[0]]; exists {
+			// Convert the stored object to Lua value
+			luaValue, err := lr.GoToLua(obj)
+			if err != nil {
+				return nil, errors.NewRuntimeError("lua", "LUA_VALUE_CONVERSION_ERROR", fmt.Sprintf("function conversion error: %v", err))
+			}
+			fn = luaValue
+		} else {
+			// Global function
+			fn = lr.state.GetGlobal(parts[0])
+		}
 	} else {
-		// Nested function (e.g., math.sin)
-		current := lr.state.GetGlobal(parts[0])
+		// Nested function (e.g., math.sin) - check runtimeObjects first for the first part
+		var current lua.LValue
+		if obj, exists := lr.runtimeObjects[parts[0]]; exists {
+			luaValue, err := lr.GoToLua(obj)
+			if err != nil {
+				return nil, errors.NewRuntimeError("lua", "LUA_VALUE_CONVERSION_ERROR", fmt.Sprintf("function conversion error: %v", err))
+			}
+			current = luaValue
+		} else {
+			current = lr.state.GetGlobal(parts[0])
+		}
+
 		for i := 1; i < len(parts)-1; i++ {
 			if current.Type() != lua.LTTable {
 				return nil, errors.NewRuntimeError("lua", "LUA_NOT_A_TABLE", fmt.Sprintf("'%s' is not a table", strings.Join(parts[:i], ".")))
@@ -456,7 +496,7 @@ func (lr *LuaRuntime) ExecuteCodeBlockWithVariables(code string, variables []str
 
 	// После успешного выполнения, захватываем только указанные переменные
 	if len(variables) > 0 {
-		// Получаем указанные переменные из Lua
+		// Получаем указанные переменные из Lua и удаляем их из глобальной области
 		for _, varName := range variables {
 			value := lr.state.GetGlobal(varName)
 			if value.Type() != lua.LTNil {
@@ -464,6 +504,8 @@ func (lr *LuaRuntime) ExecuteCodeBlockWithVariables(code string, variables []str
 				goValue := lr.luaToGo(value)
 				// Для простоты сохраняем в runtimeObjects, так как у Lua нет отдельного кеша переменных
 				lr.runtimeObjects[varName] = goValue
+				// Удаляем переменную из глобальной области Lua, чтобы она была доступна только через квалифицированный доступ
+				lr.state.SetGlobal(varName, lua.LNil)
 			}
 		}
 	}

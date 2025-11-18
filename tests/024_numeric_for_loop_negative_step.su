@@ -1,0 +1,29 @@
+// Test for numeric for loop with negative step functionality
+
+// Test 1: Basic negative step with curly brace syntax
+for i = 10, -1, -2 {
+    lua.print("countdown", i)
+}
+
+// Test 2: Negative step with curly brace syntax
+for i = 15, 4, -3 {
+    js.print("negative_step_3", i)
+}
+
+// Test 3: Step of -1 (simple countdown)
+for i = 5, -1, -1 {
+    lua.print("countdown_1", i)
+}
+
+// Test 4: Negative step with variables
+start = 20
+end_val = 9
+step_val = -4
+for i = start, end_val, step_val {
+    js.print("variable_negative", i)
+}
+
+// Test 5: Mixed positive and negative
+for i = 5, -6, -2 {
+    lua.print("cross_zero", i)
+}

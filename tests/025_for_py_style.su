@@ -1,0 +1,10 @@
+int_var = 0
+for i in [1,2] {
+    int_var = int_var + i
+}
+lua.print(int_var)
+
+for i in [1,2] {
+    local_int_var = i
+}
+lua.print(local_int_var)

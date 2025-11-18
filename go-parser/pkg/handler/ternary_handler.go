@@ -1,8 +1,6 @@
 package handler
 
 import (
-	"fmt"
-
 	"go-parser/pkg/common"
 	"go-parser/pkg/config"
 	"go-parser/pkg/lexer"
@@ -26,19 +24,19 @@ func (h *TernaryHandler) Handle(ctx *common.ParseContext) (interface{}, error) {
 	tokenStream := ctx.TokenStream
 
 	if !tokenStream.HasMore() {
-		return nil, fmt.Errorf("unexpected EOF")
+		return nil, newErrorWithPos(tokenStream, "unexpected EOF")
 	}
 
 	// Проверяем, есть ли у нас токен ? (начало тернарного или элвис оператора)
 	if tokenStream.Current().Type != lexer.TokenQuestion {
-		return nil, fmt.Errorf("expected ? token, got %s", tokenStream.Current().Type)
+		return nil, newErrorWithTokenPos(tokenStream.Current(), "expected ? token, got %s", tokenStream.Current().Type)
 	}
 
 	_ = tokenStream.Consume() // Consuming question token
 
 	// Проверяем, есть ли следующий токен после ?
 	if !tokenStream.HasMore() {
-		return nil, fmt.Errorf("unexpected EOF after ?")
+		return nil, newErrorWithPos(tokenStream, "unexpected EOF after ?")
 	}
 
 	// Проверяем, является ли это элвис-оператором (?:)
@@ -50,7 +48,7 @@ func (h *TernaryHandler) Handle(ctx *common.ParseContext) (interface{}, error) {
 		// Это будет обработано бинарным обработчиком
 
 		// Возвращаем специальную ошибку, чтобы позволить другим обработчикам попробовать
-		return nil, fmt.Errorf("elvis operator detected, needs binary handler")
+		return nil, newErrorWithPos(tokenStream, "elvis operator detected, needs binary handler")
 	}
 
 	// Это тернарный оператор: condition ? true_expr : false_expr
@@ -59,7 +57,7 @@ func (h *TernaryHandler) Handle(ctx *common.ParseContext) (interface{}, error) {
 	// Это будет обработано бинарным обработчиком
 
 	// Возвращаем специальную ошибку, чтобы позволить другим обработчикам попробовать
-	return nil, fmt.Errorf("ternary operator detected, needs binary handler")
+	return nil, newErrorWithPos(tokenStream, "ternary operator detected, needs binary handler")
 }
 
 // CanHandle проверяет, может ли обработчик обработать текущий токен

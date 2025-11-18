@@ -8,6 +8,7 @@ import (
 	"funterm/errors"
 	"funterm/factory"
 	"funterm/jobmanager"
+	"funterm/shared"
 	"io"
 	"os"
 	"os/exec"
@@ -327,7 +328,7 @@ func (r *REPL) runPiped() error {
 
 		// Process the command
 		if err := r.processCommand(input); err != nil {
-			fmt.Printf("Error: %v\n", err)
+			r.displayError(err)
 			return err
 		}
 	}
@@ -432,16 +433,16 @@ func (r *REPL) processCommand(input string) error {
 				funtermCode = funtermCode[1 : len(funtermCode)-1]
 			}
 
-			// Execute the funterm code directly
-			result, isPrint, err := r.engine.Execute(funtermCode)
-			if err != nil {
-				return err
-			}
-			// Don't print the result if the command already produced output (isPrint flag)
-			// Only show result if it's not nil and it's not a print function
-			if result != nil && !isPrint {
-				fmt.Printf("=> %v\n", r.formatResult(result))
-			}
+		// Execute the funterm code directly
+		result, isPrint, hasResult, err := r.engine.Execute(funtermCode)
+		if err != nil {
+			return err
+		}
+		// Don't print the result if the command already produced output (isPrint flag)
+		// Only show result if hasResult is true (even if result is nil)
+		if hasResult && !isPrint {
+			fmt.Printf("=> %v\n", r.formatResult(result))
+		}
 			return nil
 		}
 
@@ -471,7 +472,7 @@ func (r *REPL) processCommand(input string) error {
 	_ = r.performanceOptimizer.PreParseCommand(input)
 
 	// Execute the command
-	result, isPrint, err := r.engine.Execute(input)
+	result, isPrint, hasResult, err := r.engine.Execute(input)
 	if err != nil {
 		return err
 	}
@@ -486,7 +487,7 @@ func (r *REPL) processCommand(input string) error {
 	}
 
 	// Print the result
-	if result != nil {
+	if hasResult {
 		// Check if this is a job ID (background task)
 		if jobID, ok := result.(jobmanager.JobID); ok {
 			fmt.Printf("[%d] %s\n", jobID, r.history[len(r.history)-1])
@@ -497,7 +498,7 @@ func (r *REPL) processCommand(input string) error {
 			}
 		}
 	} else {
-		// Show execution indicator for nil results (like lua.print)
+		// Show execution indicator for commands without results (like lua.print)
 		// But only if the command doesn't contain print functions (they already produced output)
 		if !isPrint {
 			fmt.Printf("✓ Executed\n")
@@ -691,14 +692,23 @@ func (r *REPL) printVersion() {
 
 // formatResult formats the result for display
 func (r *REPL) formatResult(result interface{}) string {
-	switch v := result.(type) {
-	case string:
-		return fmt.Sprintf("\"%s\"", v)
-	case fmt.Stringer:
-		return v.String()
-	default:
-		return fmt.Sprintf("%v", v)
+	if result == nil {
+		return "nil"
 	}
+	// For pre-formatted results (like from print function), return as-is
+	if preFormatted, ok := result.(*shared.PreFormattedResult); ok {
+		return preFormatted.Value
+	}
+	// For strings, add quotes like the old formatResult did, but not for multi-line output (likely from print functions)
+	if str, ok := result.(string); ok {
+		if strings.Contains(str, "\n") {
+			// Multi-line string, likely from print functions - return as-is
+			return str
+		}
+		return fmt.Sprintf("\"%s\"", str)
+	}
+	// For all other types, use the shared formatter
+	return shared.FormatValueForDisplay(result)
 }
 
 // GetEngine returns the execution engine (useful for testing)
@@ -765,8 +775,8 @@ func (r *REPL) executeFile(language, filePath string) error {
 		// Формируем команду для выполнения
 		cmd := fmt.Sprintf("%s.eval(\"%s\")", language, escapeString(line))
 
-		// Выполняем команду
-		result, _, err = r.engine.Execute(cmd)
+	// Выполняем команду
+	result, _, _, err = r.engine.Execute(cmd)
 		if err != nil {
 			return errors.NewSystemError("EXECUTION_ERROR", fmt.Sprintf("error at line %d: %v", i+1, err))
 		}
@@ -798,7 +808,7 @@ func (r *REPL) executeMixedFile(filePath string) error {
 
 	// Выполняем весь файл как единое целое через ExecutionEngine
 	// Это позволяет правильно обрабатывать многострочные конструкции как блоки кода
-	result, _, err := r.engine.Execute(fileContent)
+	result, _, _, err := r.engine.Execute(fileContent)
 	if err != nil {
 		return errors.NewSystemError("EXECUTION_ERROR", fmt.Sprintf("error executing file: %v", err))
 	}
@@ -898,7 +908,7 @@ func (r *REPL) ExecuteCommand(command string) (interface{}, error) {
 	_ = r.performanceOptimizer.PreParseCommand(command)
 
 	// Execute the command
-	result, _, err := r.engine.Execute(command)
+	result, _, _, err := r.engine.Execute(command)
 	if err != nil {
 		return nil, err
 	}
@@ -1158,7 +1168,7 @@ func (r *REPL) printLanguageInfo(language string) error {
 	var functions []string
 	for _, variable := range globalVars {
 		// Filter out internal variables and keep likely function names
-		if !strings.HasPrefix(variable, "_") || strings.HasPrefix(variable, "__") {
+		if strings.HasPrefix(variable, "__") {
 			functions = append(functions, variable)
 		}
 	}
@@ -1270,12 +1280,12 @@ func (r *REPL) executeBufferSimple(buffer *MultiLineBuffer) {
 	fmt.Printf("Executing a buffer (%d lines):\n", buffer.GetLineCount())
 
 	// Execute the code
-	result, isPrint, err := r.engine.Execute(content)
+	result, isPrint, hasResult, err := r.engine.Execute(content)
 
 	// Show the result
 	if err != nil {
-		fmt.Printf("Error: %v\n", err)
-	} else if result != nil {
+		r.displayError(err)
+	} else if hasResult {
 		fmt.Printf("=> %v\n", r.formatResult(result))
 	} else if !isPrint {
 		fmt.Println("✓ Executed")
@@ -1334,7 +1344,7 @@ func (r *REPL) handleSpecialCommandsSimple(line string, buffer *MultiLineBuffer)
 func (r *REPL) processSingleLine(line string) {
 	// Process the command
 	if err := r.processCommand(line); err != nil {
-		fmt.Printf("Error: %v\n", err)
+		r.displayError(err)
 	}
 }
 
@@ -1468,12 +1478,29 @@ func (r *REPL) handleDollarCommand(command string, buffer *MultiLineBuffer) {
 	}
 
 	// Execute the output as a funterm command
-	result, isPrint, err := r.engine.Execute(output)
+	result, isPrint, hasResult, err := r.engine.Execute(output)
 	if err != nil {
-		fmt.Printf("Error: %v\n", err)
-	} else if result != nil {
+		r.displayError(err)
+	} else if hasResult {
 		fmt.Printf("=> %v\n", r.formatResult(result))
 	} else if !isPrint {
 		fmt.Println("✓ Executed")
+	}
+}
+
+// displayError displays an error with position information if available
+func (r *REPL) displayError(err error) {
+	// Check if this is an ExecutionError with position information
+	if execErr, ok := err.(*errors.ExecutionError); ok {
+		if execErr.Line > 0 && execErr.Col >= 0 {
+			fmt.Printf("Error at line %d, col %d: %s\n", execErr.Line, execErr.Col, execErr.Message)
+		} else if execErr.Line > 0 {
+			fmt.Printf("Error at line %d: %s\n", execErr.Line, execErr.Message)
+		} else {
+			fmt.Printf("Error: %s\n", execErr.Message)
+		}
+	} else {
+		// For other error types, just display the error
+		fmt.Printf("Error: %v\n", err)
 	}
 }

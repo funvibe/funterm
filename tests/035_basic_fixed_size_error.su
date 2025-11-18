@@ -1,0 +1,6 @@
+data = <<1:8,2:8>>
+match data {
+    <<a:8, b:8, c:8>> -> {
+        lua.print("Should not reach here")
+    }
+}

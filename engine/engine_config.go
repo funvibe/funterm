@@ -10,7 +10,7 @@ import (
 	"funterm/jobmanager"
 	"funterm/runtime"
 	"go-parser/pkg/parser"
-	"go-parser/pkg/shared"
+	sharedparser "go-parser/pkg/shared"
 )
 
 // Sentinel errors for control flow
@@ -27,16 +27,22 @@ type ExecutionEngine struct {
 	container       container.Container
 	jobManager      *jobmanager.JobManager // Job manager for background tasks
 	// Общее хранилище переменных для всех языковых окружений
-	sharedVariables     map[string]map[string]interface{} // language -> variable -> value
-	variablesMutex      sync.RWMutex                      // для потокобезопасности
-	verbose             bool                              // Enable verbose/debug output
-	jobFinished         chan struct{}
-	localScope          *shared.Scope // ADD THIS FIELD
-	backgroundOutput    string        // Output from completed background jobs
-	currentLoopLanguage string        // Language context for unqualified variables in loops
+	sharedVariables map[string]map[string]interface{} // language -> variable -> value
+	variablesMutex  sync.RWMutex                      // для потокобезопасности
+	// Глобальные неквалифицированные переменные (доступны во всех runtimes)
+	globalVariables  map[string]*sharedparser.VariableInfo // name -> VariableInfo
+	globalMutex      sync.RWMutex                          // для потокобезопасности глобальных переменных
+	verbose          bool                                  // Enable verbose/debug output
+	jobFinished      chan struct{}
+	localScope       *sharedparser.Scope   // Local scope for variables
+	scopeStack       []*sharedparser.Scope // Stack of nested scopes
+	backgroundOutput string                // Output from completed background jobs
 	// Кэш рантаймов для переиспользования
 	runtimeCache      map[string]runtime.LanguageRuntime // language -> runtime instance
 	runtimeCacheMutex sync.RWMutex                       // для потокобезопасности кэша
+	// Кэш для отслеживания последней синхронизированной версии глобальных переменных
+	lastSyncedGlobals map[string]interface{} // name -> value
+	syncedGlobalMutex sync.RWMutex           // для потокобезопасности кэша синхронизации
 }
 
 // NewExecutionEngine creates a new execution engine with default dependencies
@@ -145,17 +151,23 @@ func NewExecutionEngineWithConfig(config ExecutionEngineConfig) (*ExecutionEngin
 		jm = jobmanager.NewJobManager(5)
 	}
 
+	// Create a single root scope
+	rootScope := sharedparser.NewScope(nil)
+
 	engine := &ExecutionEngine{
-		parser:          p,
-		runtimeManager:  rm,
-		runtimeRegistry: rr,
-		container:       diContainer,
-		jobManager:      jm,
-		sharedVariables: make(map[string]map[string]interface{}),
-		verbose:         config.Verbose,
-		jobFinished:     make(chan struct{}),
-		localScope:      shared.NewScope(nil),                     // INITIALIZE THE NEW FIELD
-		runtimeCache:    make(map[string]runtime.LanguageRuntime), // Initialize runtime cache
+		parser:            p,
+		runtimeManager:    rm,
+		runtimeRegistry:   rr,
+		container:         diContainer,
+		jobManager:        jm,
+		sharedVariables:   make(map[string]map[string]interface{}),
+		globalVariables:   make(map[string]*sharedparser.VariableInfo), // Initialize global variables
+		verbose:           config.Verbose,
+		jobFinished:       make(chan struct{}),
+		localScope:        rootScope,                                // Use the same root scope
+		scopeStack:        []*sharedparser.Scope{rootScope},         // Initialize scope stack with the same root scope
+		runtimeCache:      make(map[string]runtime.LanguageRuntime), // Initialize runtime cache
+		lastSyncedGlobals: make(map[string]interface{}),             // Initialize sync cache
 	}
 
 	return engine, nil

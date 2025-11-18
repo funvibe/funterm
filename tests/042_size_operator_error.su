@@ -1,0 +1,2 @@
+int_var = 42
+lua.print(@int_var)

@@ -1,0 +1,29 @@
+# Test size operator @ in conditions (if, match)
+# This tests that @ operator works in conditional expressions
+
+data = <<"Hello World">>
+size = @data
+arr = [1, 2, 3, 4, 5]
+size_arr = len(arr)
+
+# Test @ in if condition
+if @data == size && @data > 5 {
+    lua.print("if: data larger than 5 bytes")
+}
+
+# Test len() in if condition
+if len(arr) == size_arr && len(arr) > 3 {
+    lua.print("if: array has more than 3 elements")
+}
+
+# Test @ in nested condition
+if @data > 10 {
+    if len(arr) == 5 {
+        lua.print("nested: data > 10 bytes and array length is 5")
+    }
+}
+
+# Test @ with parentheses
+if (@data == 11) {
+    lua.print("if with parens: data size is 11")
+}

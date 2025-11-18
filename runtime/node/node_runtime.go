@@ -220,9 +220,22 @@ func (nr *NodeRuntime) initializeNodeEnvironment() error {
 
 // executeConsoleLog handles console.log functionality for both print and console.log calls
 func (nr *NodeRuntime) executeConsoleLog(args []interface{}) (interface{}, error) {
+	// Filter out nil arguments to prevent outputting "undefined"
+	var filteredArgs []interface{}
+	for _, arg := range args {
+		if arg != nil {
+			filteredArgs = append(filteredArgs, arg)
+		}
+	}
+
+	// If all arguments are nil, return no output
+	if len(filteredArgs) == 0 {
+		return nil, nil
+	}
+
 	// Special handling for console.log
 	// It prints to stdout and we'll return the output as the result.
-	argsJSON, err := json.Marshal(args)
+	argsJSON, err := json.Marshal(filteredArgs)
 	if err != nil {
 		return nil, errors.NewRuntimeError("node", "INVALID_ARGUMENT", fmt.Sprintf("failed to marshal arguments: %v", err))
 	}
@@ -1000,6 +1013,17 @@ func (nr *NodeRuntime) GetRuntimeObjects() map[string]interface{} {
 	return make(map[string]interface{})
 }
 
+// GetVariableFromRuntimeObject получает переменную из variables cache
+func (nr *NodeRuntime) GetVariableFromRuntimeObject(name string) (interface{}, error) {
+	nr.mutex.RLock()
+	defer nr.mutex.RUnlock()
+
+	if value, exists := nr.variables[name]; exists {
+		return value, nil
+	}
+	return nil, fmt.Errorf("variable '%s' not found in runtime objects", name)
+}
+
 // ExecuteCodeBlockWithVariables выполняет код с сохранением указанных переменных
 func (nr *NodeRuntime) ExecuteCodeBlockWithVariables(code string, variables []string) (interface{}, error) {
 	if !nr.ready {
@@ -1049,7 +1073,7 @@ func (nr *NodeRuntime) ExecuteCodeBlockWithVariables(code string, variables []st
 
 		variablesCode := fmt.Sprintf(`
 // Функция для безопасной сериализации объекта
-function suterm_safe_serialize(obj) {
+function funterm_safe_serialize(obj) {
     try {
         return JSON.stringify(obj);
     } catch (e) {
@@ -1058,9 +1082,9 @@ function suterm_safe_serialize(obj) {
 }
 
 // Функция для проверки, нужно ли включать переменную
-function suterm_should_include(var_name, var_value) {
+function funterm_should_include(var_name, var_value) {
     // Пропускаем внутренние переменные
-    if (var_name.startsWith('_') || var_name === 'suterm_safe_serialize' || var_name === 'suterm_should_include') {
+    if (var_name.startsWith('_') || var_name === 'funterm_safe_serialize' || var_name === 'funterm_should_include') {
         return false;
     }
     // Пропускаем функции
@@ -1071,7 +1095,7 @@ function suterm_should_include(var_name, var_value) {
 }
 
 // Получаем указанные переменные из глобальной области
-var suterm_globals_dict = {};
+var funterm_globals_dict = {};
 var variablesToCapture = [%s];
 
 for (var i = 0; i < variablesToCapture.length; i++) {
@@ -1079,15 +1103,15 @@ for (var i = 0; i < variablesToCapture.length; i++) {
     try {
         // Проверяем глобальную область видимости (аналог globals() в Python)
         var varValue = globalThis[varName];
-        if (typeof varValue !== 'undefined' && suterm_should_include(varName, varValue)) {
-            suterm_globals_dict[varName] = varValue;
+        if (typeof varValue !== 'undefined' && funterm_should_include(varName, varValue)) {
+            funterm_globals_dict[varName] = varValue;
         }
     } catch (e) {
         // Пропускаем переменные, которые не удалось обработать
     }
 }
 
-console.log(JSON.stringify(suterm_globals_dict));
+console.log(JSON.stringify(funterm_globals_dict));
 	`, strings.Join(variableNames, ", "))
 
 		variablesOutput, err := nr.sendAndAwait(variablesCode)

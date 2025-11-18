@@ -31,12 +31,12 @@ func (h *UnaryExpressionHandler) Handle(ctx *common.ParseContext) (interface{}, 
 	tokenStream := ctx.TokenStream
 
 	if !tokenStream.HasMore() {
-		return nil, fmt.Errorf("unexpected EOF in unary expression")
+		return nil, newErrorWithPos(tokenStream, "unexpected EOF in unary expression")
 	}
 
 	operatorToken := tokenStream.Current()
 	if !isUnaryOperator(operatorToken.Type) {
-		return nil, fmt.Errorf("expected unary operator, got %s", operatorToken.Type)
+		return nil, newErrorWithTokenPos(operatorToken, "expected unary operator, got %s", operatorToken.Type)
 	}
 
 	// Потребляем оператор
@@ -44,7 +44,20 @@ func (h *UnaryExpressionHandler) Handle(ctx *common.ParseContext) (interface{}, 
 
 	// Читаем операнд
 	if !tokenStream.HasMore() {
-		return nil, fmt.Errorf("unexpected EOF after unary operator")
+		return nil, newErrorWithPos(tokenStream, "unexpected EOF after unary operator")
+	}
+
+	// Специальная обработка для оператора @ (размер bitstring)
+	if operatorToken.Type == lexer.TokenAt {
+		operand, err := h.parseSizeOperand(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse size operand: %v", err)
+		}
+		return ast.NewUnaryExpression(operatorToken.Value, operand, ast.Position{
+			Line:   operatorToken.Line,
+			Column: operatorToken.Column,
+			Offset: operatorToken.Position,
+		}), nil
 	}
 
 	operand, err := h.parseOperand(ctx)
@@ -60,15 +73,110 @@ func (h *UnaryExpressionHandler) Handle(ctx *common.ParseContext) (interface{}, 
 	}), nil
 }
 
+// parseSizeOperand парсит операнд для оператора @ (размер bitstring)
+// Поддерживает как @(expression) так и @variable
+func (h *UnaryExpressionHandler) parseSizeOperand(ctx *common.ParseContext) (ast.Expression, error) {
+	tokenStream := ctx.TokenStream
+
+	// Проверяем, есть ли открывающая скобка
+	if tokenStream.HasMore() && tokenStream.Current().Type == lexer.TokenLeftParen {
+		// Используем скобки: @(expression)
+		tokenStream.Consume() // потребляем '('
+
+		// Парсим выражение внутри скобок
+		if !tokenStream.HasMore() {
+			return nil, newErrorWithPos(tokenStream, "unexpected EOF in @ expression")
+		}
+
+		var expr ast.Expression
+		var err error
+
+		// Если следующий токен - <<, это bitstring, иначе обычное выражение
+		if tokenStream.Current().Type == lexer.TokenDoubleLeftAngle {
+			// Используем bitstring handler для парсинга bitstring
+			bitstringHandler := NewBitstringHandler(config.ConstructHandlerConfig{})
+			result, err := bitstringHandler.Handle(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse bitstring in @ expression: %v", err)
+			}
+			if bs, ok := result.(*ast.BitstringExpression); ok {
+				expr = bs
+			} else {
+				return nil, fmt.Errorf("expected BitstringExpression, got %T", result)
+			}
+		} else {
+			// Для других выражений используем binary expression handler
+			binaryHandler := NewBinaryExpressionHandler(config.ConstructHandlerConfig{})
+			expr, err = binaryHandler.ParseFullExpression(ctx, nil)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse expression in @ parentheses: %v", err)
+			}
+		}
+
+		// Ожидаем закрывающую скобку
+		if !tokenStream.HasMore() || tokenStream.Current().Type != lexer.TokenRightParen {
+			return nil, newErrorWithPos(tokenStream, "expected ')' after @ expression")
+		}
+		tokenStream.Consume() // потребляем ')'
+
+		return expr, nil
+	} else {
+		// Без скобок: @variable или @field
+		// Парсим простой операнд (идентификатор, qualified variable)
+		operand, err := h.parseSimpleSizeOperand(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse size operand: %v", err)
+		}
+		return operand, nil
+	}
+}
+
+// parseSimpleSizeOperand парсит простой операнд для @ без скобок
+func (h *UnaryExpressionHandler) parseSimpleSizeOperand(ctx *common.ParseContext) (ast.Expression, error) {
+	tokenStream := ctx.TokenStream
+
+	if !tokenStream.HasMore() {
+		return nil, newErrorWithPos(tokenStream, "unexpected EOF after @ operator")
+	}
+
+	token := tokenStream.Current()
+
+	switch token.Type {
+	case lexer.TokenIdentifier:
+		// Это может быть простой идентификатор или qualified variable
+		if tokenStream.Peek().Type == lexer.TokenDot {
+			// Это qualified variable
+			return h.parseQualifiedVariable(ctx)
+		} else {
+			// Простой идентификатор
+			tokenStream.Consume()
+			return ast.NewVariableRead(ast.NewIdentifier(token, token.Value)), nil
+		}
+
+	case lexer.TokenLua, lexer.TokenPython, lexer.TokenJS, lexer.TokenGo, lexer.TokenNode, lexer.TokenPy:
+		// Language token - qualified variable
+		return h.parseQualifiedVariable(ctx)
+
+	default:
+		return nil, newErrorWithTokenPos(token, "unsupported operand for @ operator: %s", token.Type)
+	}
+}
+
 // parseOperand парсит операнд унарного выражения
 func (h *UnaryExpressionHandler) parseOperand(ctx *common.ParseContext) (ast.Expression, error) {
 	tokenStream := ctx.TokenStream
 
 	if !tokenStream.HasMore() {
-		return nil, fmt.Errorf("unexpected EOF in operand")
+		return nil, newErrorWithPos(tokenStream, "unexpected EOF in operand")
 	}
 
 	token := tokenStream.Current()
+
+	// Проверяем language tokens (python, lua, js, etc.)
+	if token.IsLanguageToken() {
+		// Это language call
+		return h.parseLanguageCall(ctx)
+	}
 
 	switch token.Type {
 	case lexer.TokenIdentifier:
@@ -88,14 +196,11 @@ func (h *UnaryExpressionHandler) parseOperand(ctx *common.ParseContext) (ast.Exp
 	case lexer.TokenNumber:
 		// Числовой литерал
 		tokenStream.Consume()
-		return &ast.NumberLiteral{
-			Value: parseFloat(token.Value),
-			Pos: ast.Position{
-				Line:   token.Line,
-				Column: token.Column,
-				Offset: token.Position,
-			},
-		}, nil
+		value, err := parseNumber(token.Value)
+		if err != nil {
+			return nil, newErrorWithTokenPos(token, "invalid number format: %s", token.Value)
+		}
+		return createNumberLiteral(token, value), nil
 
 	case lexer.TokenString:
 		// Строковой литерал
@@ -135,21 +240,33 @@ func (h *UnaryExpressionHandler) parseOperand(ctx *common.ParseContext) (ast.Exp
 
 		// Проверяем и потребляем закрывающую скобку
 		if !tokenStream.HasMore() || tokenStream.Current().Type != lexer.TokenRightParen {
-			return nil, fmt.Errorf("expected ')' after expression")
+			return nil, newErrorWithPos(tokenStream, "expected ')' after expression")
 		}
 		tokenStream.Consume() // потребляем ')'
 
 		return expr, nil
 
+	case lexer.TokenMinus, lexer.TokenNot, lexer.TokenTilde, lexer.TokenAt, lexer.TokenPlus:
+		// Вложенный унарный оператор - рекурсивно обрабатываем
+		unaryHandler := NewUnaryExpressionHandler(config.ConstructHandlerConfig{})
+		result, err := unaryHandler.Handle(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse nested unary operator: %v", err)
+		}
+		if expr, ok := result.(ast.Expression); ok {
+			return expr, nil
+		}
+		return nil, fmt.Errorf("expected Expression, got %T", result)
+
 	default:
-		return nil, fmt.Errorf("unsupported operand type: %s", token.Type)
+		return nil, newErrorWithTokenPos(token, "unsupported operand type: %s", token.Type)
 	}
 }
 
 // parseLanguageCall парсит вызов функции другого языка
 func (h *UnaryExpressionHandler) parseLanguageCall(ctx *common.ParseContext) (ast.Expression, error) {
 	// Используем существующий LanguageCallHandler
-	languageCallHandler := NewLanguageCallHandler(config.ConstructHandlerConfig{})
+	languageCallHandler := NewLanguageCallHandler(config.ConstructHandlerConfig{ConstructType: common.ConstructLanguageCall})
 	result, err := languageCallHandler.Handle(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse language call: %v", err)
@@ -169,7 +286,7 @@ func (h *UnaryExpressionHandler) parseQualifiedVariable(ctx *common.ParseContext
 	// Потребляем первый идентификатор (язык)
 	firstToken := tokenStream.Consume()
 	if firstToken.Type != lexer.TokenIdentifier {
-		return nil, fmt.Errorf("expected identifier for qualified variable, got %s", firstToken.Type)
+		return nil, newErrorWithTokenPos(firstToken, "expected identifier for qualified variable, got %s", firstToken.Type)
 	}
 
 	language := firstToken.Value
@@ -183,7 +300,7 @@ func (h *UnaryExpressionHandler) parseQualifiedVariable(ctx *common.ParseContext
 
 		// Проверяем, что после точки идет идентификатор
 		if !tokenStream.HasMore() || tokenStream.Current().Type != lexer.TokenIdentifier {
-			return nil, fmt.Errorf("expected identifier after dot in qualified variable")
+			return nil, newErrorWithPos(tokenStream, "expected identifier after dot in qualified variable")
 		}
 
 		// Потребляем идентификатор
@@ -224,12 +341,3 @@ func (h *UnaryExpressionHandler) Name() string {
 	return h.config.Name
 }
 
-// isUnaryOperator проверяет, является ли токен унарным оператором
-func isUnaryOperator(tokenType lexer.TokenType) bool {
-	switch tokenType {
-	case lexer.TokenPlus, lexer.TokenMinus, lexer.TokenNot, lexer.TokenTilde:
-		return true
-	default:
-		return false
-	}
-}

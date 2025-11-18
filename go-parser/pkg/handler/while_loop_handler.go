@@ -54,23 +54,32 @@ func (h *WhileLoopHandler) Handle(ctx *common.ParseContext) (interface{}, error)
 	// 1. Проверяем токен 'while'
 	whileToken := tokenStream.Current()
 	if whileToken.Type != lexer.TokenWhile {
-		return nil, fmt.Errorf("expected 'while', got %s", whileToken.Type)
+		return nil, newErrorWithTokenPos(whileToken, "expected 'while', got %s", whileToken.Type)
 	}
 
 	// 2. Проверяем структуру перед потреблением токенов
 	// While-цикл: while <condition> { ... }
 	if !tokenStream.HasMore() {
-		return nil, fmt.Errorf("expected condition after 'while' - no more tokens")
+		return nil, newErrorWithTokenPos(whileToken, "expected condition after 'while' - no more tokens")
 	}
 
 	// Потребляем 'while'
 	tokenStream.Consume()
 
-	// 3. Проверяем и потребляем токен '('
-	if !tokenStream.HasMore() || tokenStream.Current().Type != lexer.TokenLeftParen {
-		return nil, fmt.Errorf("expected '(' after 'while'")
+	// 3. Проверяем наличие токена '(' (необязательный для синтаксиса без скобок)
+	var lParenToken lexer.Token
+	if tokenStream.HasMore() && tokenStream.Current().Type == lexer.TokenLeftParen {
+		lParenToken = tokenStream.Consume()
+	} else {
+		// Если скобок нет, создаем пустой токен для совместимости
+		lParenToken = lexer.Token{
+			Type:     lexer.TokenLeftParen,
+			Value:    "(",
+			Position: whileToken.Position,
+			Line:     whileToken.Line,
+			Column:   whileToken.Column,
+		}
 	}
-	tokenStream.Consume() // потребляем '('
 
 	// 4. Читаем условие цикла
 	condition, err := h.parseCondition(ctx, tokenStream)
@@ -78,15 +87,28 @@ func (h *WhileLoopHandler) Handle(ctx *common.ParseContext) (interface{}, error)
 		return nil, fmt.Errorf("failed to parse condition: %v", err)
 	}
 
-	// 5. Проверяем и потребляем токен ')'
-	if !tokenStream.HasMore() || tokenStream.Current().Type != lexer.TokenRightParen {
-		return nil, fmt.Errorf("expected ')' after condition")
+	// 5. Проверяем и потребляем токен ')' (только если была открывающая скобка)
+	var rParenToken lexer.Token
+	if lParenToken.Position != whileToken.Position {
+		// Была открывающая скобка (позиция отличается от whileToken), значит должна быть и закрывающая
+		if !tokenStream.HasMore() || tokenStream.Current().Type != lexer.TokenRightParen {
+			return nil, newErrorWithPos(tokenStream, "expected ')' after condition")
+		}
+		rParenToken = tokenStream.Consume()
+	} else {
+		// Не было открывающей скобки, создаем пустой токен для совместимости
+		rParenToken = lexer.Token{
+			Type:     lexer.TokenRightParen,
+			Value:    ")",
+			Position: whileToken.Position,
+			Line:     whileToken.Line,
+			Column:   whileToken.Column,
+		}
 	}
-	tokenStream.Consume() // потребляем ')'
 
 	// 4. Проверяем и потребляем токен '{'
 	if !tokenStream.HasMore() || tokenStream.Current().Type != lexer.TokenLBrace {
-		return nil, fmt.Errorf("expected '{' after condition")
+		return nil, newErrorWithPos(tokenStream, "expected '{' after condition")
 	}
 	lBraceToken := tokenStream.Consume()
 
@@ -98,13 +120,13 @@ func (h *WhileLoopHandler) Handle(ctx *common.ParseContext) (interface{}, error)
 
 	// 6. Проверяем и потребляем токен '}'
 	if !tokenStream.HasMore() || tokenStream.Current().Type != lexer.TokenRBrace {
-		return nil, fmt.Errorf("expected '}' after loop body")
+		return nil, newErrorWithPos(tokenStream, "expected '}' after loop body")
 	}
 	rBraceToken := tokenStream.Consume()
 
 	// 7. Создаем узел AST
 	blockStatement := ast.NewBlockStatement(lBraceToken, rBraceToken, body)
-	loopNode := ast.NewWhileStatement(whileToken, lBraceToken, rBraceToken, condition, blockStatement)
+	loopNode := ast.NewWhileStatement(whileToken, lParenToken, rParenToken, condition, blockStatement)
 
 	return loopNode, nil
 }
@@ -112,7 +134,7 @@ func (h *WhileLoopHandler) Handle(ctx *common.ParseContext) (interface{}, error)
 // parseCondition парсит условие цикла
 func (h *WhileLoopHandler) parseCondition(ctx *common.ParseContext, tokenStream stream.TokenStream) (ast.Expression, error) {
 	if !tokenStream.HasMore() {
-		return nil, fmt.Errorf("unexpected EOF in condition")
+		return nil, newErrorWithPos(tokenStream, "unexpected EOF in condition")
 	}
 
 	// Поддерживаем простые условия и условия в скобках:
@@ -124,6 +146,28 @@ func (h *WhileLoopHandler) parseCondition(ctx *common.ParseContext, tokenStream 
 
 	token := tokenStream.Current()
 	switch token.Type {
+	case lexer.TokenAt:
+		// Unary operator @ (size operator) - first parse unary expression, then binary operators
+		unaryHandler := NewUnaryExpressionHandler(config.ConstructHandlerConfig{})
+		unaryResult, err := unaryHandler.Handle(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse unary @ expression: %v", err)
+		}
+		if unaryExpr, ok := unaryResult.(*ast.UnaryExpression); ok {
+			// Now parse binary operators after the unary expression
+			binaryHandler := NewBinaryExpressionHandlerWithVerbose(config.ConstructHandlerConfig{}, h.verbose)
+			return binaryHandler.ParseFullExpression(ctx, unaryExpr)
+		}
+		return nil, fmt.Errorf("expected UnaryExpression from @, got %T", unaryResult)
+
+	case lexer.TokenTrue:
+		tokenStream.Consume()
+		return &ast.BooleanLiteral{Value: true, Pos: matchHandlerTokenToPosition(token)}, nil
+
+	case lexer.TokenFalse:
+		tokenStream.Consume()
+		return &ast.BooleanLiteral{Value: false, Pos: matchHandlerTokenToPosition(token)}, nil
+
 	case lexer.TokenLeftParen:
 		// Условие в скобках - потребляем скобку и читаем условие внутри
 		tokenStream.Consume() // потребляем '('
@@ -208,11 +252,10 @@ func (h *WhileLoopHandler) parseCondition(ctx *common.ParseContext, tokenStream 
 			return expr, nil
 		}
 
-		// Проверяем и потребляем закрывающую скобку
-		if !tokenStream.HasMore() || tokenStream.Current().Type != lexer.TokenRightParen {
-			return nil, fmt.Errorf("expected ')' after condition")
+		// Проверяем и потребляем закрывающую скобку (только если было условие в скобках)
+		if tokenStream.HasMore() && tokenStream.Current().Type == lexer.TokenRightParen {
+			tokenStream.Consume() // потребляем ')'
 		}
-		tokenStream.Consume() // потребляем ')'
 
 		return leftExpr, nil
 
@@ -275,14 +318,11 @@ func (h *WhileLoopHandler) parseCondition(ctx *common.ParseContext, tokenStream 
 	case lexer.TokenNumber:
 		// Числовой литерал
 		tokenStream.Consume()
-		return &ast.NumberLiteral{
-			Value: parseFloat(token.Value),
-			Pos: ast.Position{
-				Line:   token.Line,
-				Column: token.Column,
-				Offset: token.Position,
-			},
-		}, nil
+		value, err := parseNumber(token.Value)
+		if err != nil {
+			return nil, fmt.Errorf("invalid number format: %s", token.Value)
+		}
+		return createNumberLiteral(token, value), nil
 
 	default:
 		return nil, fmt.Errorf("unsupported condition type: %s", token.Type)
@@ -350,6 +390,32 @@ func (h *WhileLoopHandler) parseLoopBody(ctx *common.ParseContext) ([]ast.Statem
 			}
 		}
 
+		// Если встречаем 'match', это match statement
+		if current.Type == lexer.TokenMatch {
+			matchHandler := NewMatchHandler(config.ConstructHandlerConfig{})
+			result, err := matchHandler.Handle(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse match statement: %v", err)
+			}
+			if matchStmt, ok := result.(*ast.MatchStatement); ok {
+				body = append(body, matchStmt)
+				continue
+			}
+		}
+
+		// Если встречаем 'if', это if statement
+		if current.Type == lexer.TokenIf {
+			ifHandler := NewIfHandler(config.ConstructHandlerConfig{})
+			result, err := ifHandler.Handle(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse if statement: %v", err)
+			}
+			if ifStmt, ok := result.(*ast.IfStatement); ok {
+				body = append(body, ifStmt)
+				continue
+			}
+		}
+
 		// Если встречаем 'break', это break оператор
 		if current.Type == lexer.TokenBreak {
 			tokenStream.Consume()
@@ -408,6 +474,45 @@ func (h *WhileLoopHandler) parseLoopBody(ctx *common.ParseContext) ([]ast.Statem
 
 			// Если LanguageCallHandler не сработал, восстанавливаем позицию
 			tokenStream.SetPosition(currentPos)
+		}
+
+		// Проверяем, не является ли это bitstring pattern assignment (<<...>> = ...)
+		if current.Type == lexer.TokenDoubleLeftAngle {
+			bitstringPatternHandler := NewBitstringPatternAssignmentHandler(110, 4) // priority and order like in UnifiedParser
+			result, err := bitstringPatternHandler.Handle(ctx)
+			if err == nil {
+				if bitstringPattern, ok := result.(*ast.BitstringPatternAssignment); ok {
+					body = append(body, bitstringPattern)
+					continue
+				}
+			} else {
+				if h.verbose {
+					fmt.Printf("DEBUG parseLoopBody: bitstring pattern parsing failed: %v\n", err)
+				}
+			}
+		}
+
+		// Проверяем, не является ли это вызовом builtin функции
+		if current.Type == lexer.TokenIdentifier && tokenStream.Peek().Type == lexer.TokenLeftParen {
+			if h.verbose {
+				fmt.Printf("DEBUG parseLoopBody: found identifier followed by '(', trying builtin function\n")
+			}
+			// Это может быть builtin функция типа print(...)
+			builtinHandler := NewBuiltinFunctionHandlerWithVerbose(config.ConstructHandlerConfig{}, h.verbose)
+			result, err := builtinHandler.Handle(ctx)
+			if err == nil {
+				if h.verbose {
+					fmt.Printf("DEBUG parseLoopBody: builtin function parsing succeeded\n")
+				}
+				if builtinCall, ok := result.(*ast.BuiltinFunctionCall); ok {
+					body = append(body, builtinCall)
+					continue
+				}
+			} else {
+				if h.verbose {
+					fmt.Printf("DEBUG parseLoopBody: builtin function parsing failed: %v\n", err)
+				}
+			}
 		}
 
 		// Если не смогли распарсить токен, пропускаем его чтобы избежать бесконечного цикла

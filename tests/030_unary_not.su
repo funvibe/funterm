@@ -1,0 +1,11 @@
+py.x = 5
+py.y = 10
+flag = false
+
+if (py.x < 0 && py.y >= 10) || !flag {
+    lua.print("unary not works")
+}
+
+if ((py.x < 0 && py.y >= 10) || !flag) {
+    lua.print("unary not works parens")
+}

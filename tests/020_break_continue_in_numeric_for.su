@@ -1,0 +1,29 @@
+# Test break and continue statements in numeric for loops
+
+# Test if without break/continue
+for i = 1,4 {
+    if (i == 2) {
+        js.print("found_two", i)
+    } else if (i == 1) {
+        js.print("found_one", i)
+    } else {
+        js.print("found_three", i)
+    }
+    js.print("iteration", i)
+}
+
+# Test if with break
+for i = 1,6 {
+    if (i == 3) {
+        break
+    }
+    js.print("before_break", i)
+}
+
+# Test if with continue
+for i = 1,6 {
+    if (i == 3) {
+        continue
+    }
+    js.print("not_three", i)
+}

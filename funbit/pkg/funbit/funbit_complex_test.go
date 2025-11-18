@@ -3,6 +3,7 @@ package funbit
 import (
 	"fmt"
 	"math"
+	"math/big"
 	"testing"
 	"unicode/utf16"
 )
@@ -1196,6 +1197,289 @@ func BenchmarkMatching(b *testing.B) {
 			var rest []byte
 			RestBinary(matcher, &rest)
 			Match(matcher, bitstring)
+		}
+	})
+}
+
+// TestBigIntSupport проверяет поддержку произвольной точности целых чисел
+func TestBigIntSupport(t *testing.T) {
+	t.Run("Basic big.Int construction and matching", func(t *testing.T) {
+		// Create a huge integer (fits in 64 bits for funbit compatibility)
+		hugeInt := new(big.Int)
+		hugeInt.SetInt64(9223372036854775806) // Close to int64 max
+
+		builder := NewBuilder()
+		AddInteger(builder, hugeInt, WithSize(64)) // 64-bit integer
+
+		bitstring, err := Build(builder)
+		if err != nil {
+			t.Fatalf("Failed to build big.Int bitstring: %v", err)
+		}
+
+		if bitstring.Length() != 64 {
+			t.Errorf("Expected 64 bits, got %d", bitstring.Length())
+		}
+
+		// Pattern matching extracts as int64, then convert to big.Int
+		matcher := NewMatcher()
+		var extracted int64
+		Integer(matcher, &extracted, WithSize(64))
+
+		results, err := Match(matcher, bitstring)
+		if err != nil {
+			t.Fatalf("Failed to match big.Int pattern: %v", err)
+		}
+
+		if len(results) == 0 {
+			t.Fatalf("Expected non-empty results")
+		}
+
+		extractedBigInt := big.NewInt(extracted)
+		if extractedBigInt.Cmp(hugeInt) != 0 {
+			t.Errorf("Expected %s, got %s", hugeInt.String(), extractedBigInt.String())
+		}
+	})
+
+	t.Run("Mixed regular integers and big.Int", func(t *testing.T) {
+		regularInt := 42
+		hugeInt := new(big.Int)
+		hugeInt.SetInt64(1234567890) // Fits in 64 bits
+
+		builder := NewBuilder()
+		AddInteger(builder, regularInt, WithSize(8)) // Regular int
+		AddInteger(builder, hugeInt, WithSize(64))   // Big.Int
+
+		bitstring, err := Build(builder)
+		if err != nil {
+			t.Fatalf("Failed to build mixed bitstring: %v", err)
+		}
+
+		if bitstring.Length() != 72 { // 8 + 64
+			t.Errorf("Expected 72 bits, got %d", bitstring.Length())
+		}
+
+		// Extract both types (both as int64 from funbit)
+		matcher := NewMatcher()
+		var regularExtracted int
+		var hugeExtracted int64
+
+		Integer(matcher, &regularExtracted, WithSize(8))
+		Integer(matcher, &hugeExtracted, WithSize(64))
+
+		results, err := Match(matcher, bitstring)
+		if err != nil {
+			t.Fatalf("Failed to match mixed pattern: %v", err)
+		}
+
+		if len(results) == 0 {
+			t.Fatalf("Expected non-empty results")
+		}
+
+		if regularExtracted != regularInt {
+			t.Errorf("Expected %d, got %d", regularInt, regularExtracted)
+		}
+
+		hugeExtractedBigInt := big.NewInt(hugeExtracted)
+		if hugeExtractedBigInt.Cmp(hugeInt) != 0 {
+			t.Errorf("Expected %s, got %s", hugeInt.String(), hugeExtractedBigInt.String())
+		}
+	})
+
+	t.Run("Big.Int with endianness", func(t *testing.T) {
+		testBig := new(big.Int)
+		testBig.SetInt64(0x123456789ABCDEF0) // 64-bit hex value as int64
+
+		builder := NewBuilder()
+		AddInteger(builder, testBig, WithSize(64), WithEndianness("big"))
+		AddInteger(builder, testBig, WithSize(64), WithEndianness("little"))
+
+		bitstring, err := Build(builder)
+		if err != nil {
+			t.Fatalf("Failed to build endianness test: %v", err)
+		}
+
+		if bitstring.Length() != 128 {
+			t.Errorf("Expected 128 bits, got %d", bitstring.Length())
+		}
+
+		matcher := NewMatcher()
+		var bigEndian, littleEndian int64
+
+		Integer(matcher, &bigEndian, WithSize(64), WithEndianness("big"))
+		Integer(matcher, &littleEndian, WithSize(64), WithEndianness("little"))
+
+		results, err := Match(matcher, bitstring)
+		if err != nil {
+			t.Fatalf("Failed to match endianness pattern: %v", err)
+		}
+
+		if len(results) == 0 {
+			t.Fatalf("Expected non-empty results")
+		}
+
+		bigEndianBigInt := big.NewInt(bigEndian)
+		littleEndianBigInt := big.NewInt(littleEndian)
+
+		if bigEndianBigInt.Cmp(testBig) != 0 {
+			t.Errorf("Big-endian mismatch: expected %s, got %s", testBig.String(), bigEndianBigInt.String())
+		}
+
+		if littleEndianBigInt.Cmp(testBig) != 0 {
+			t.Errorf("Little-endian mismatch: expected %s, got %s", testBig.String(), littleEndianBigInt.String())
+		}
+	})
+
+	t.Run("Big.Int signedness", func(t *testing.T) {
+		// Test negative big.Int
+		negativeBig := new(big.Int)
+		negativeBig.SetInt64(-12345)
+
+		builder := NewBuilder()
+		AddInteger(builder, negativeBig, WithSize(32), WithSigned(true))
+
+		bitstring, err := Build(builder)
+		if err != nil {
+			t.Fatalf("Failed to build signed big.Int: %v", err)
+		}
+
+		matcher := NewMatcher()
+		var extracted int64
+		Integer(matcher, &extracted, WithSize(32), WithSigned(true))
+
+		results, err := Match(matcher, bitstring)
+		if err != nil {
+			t.Fatalf("Failed to match signed big.Int: %v", err)
+		}
+
+		if len(results) == 0 {
+			t.Fatalf("Expected non-empty results")
+		}
+
+		extractedBigInt := big.NewInt(extracted)
+		if extractedBigInt.Cmp(negativeBig) != 0 {
+			t.Errorf("Expected %s, got %s", negativeBig.String(), extractedBigInt.String())
+		}
+	})
+
+	t.Run("Big.Int overflow handling", func(t *testing.T) {
+		// Test big.Int that fits in 64 bits but is large
+		overflowBig := new(big.Int)
+		overflowBig.SetInt64(9223372036854775806) // Close to int64 max
+
+		builder := NewBuilder()
+		AddInteger(builder, overflowBig, WithSize(64))
+
+		bitstring, err := Build(builder)
+		if err != nil {
+			t.Fatalf("Failed to build overflow big.Int: %v", err)
+		}
+
+		matcher := NewMatcher()
+		var extracted int64
+		Integer(matcher, &extracted, WithSize(64))
+
+		results, err := Match(matcher, bitstring)
+		if err != nil {
+			t.Fatalf("Failed to match overflow big.Int: %v", err)
+		}
+
+		if len(results) == 0 {
+			t.Fatalf("Expected non-empty results")
+		}
+
+		extractedBigInt := big.NewInt(extracted)
+		if extractedBigInt.Cmp(overflowBig) != 0 {
+			t.Errorf("Expected %s, got %s", overflowBig.String(), extractedBigInt.String())
+		}
+
+		// Verify it fits in int64
+		if !extractedBigInt.IsInt64() {
+			t.Error("Expected big.Int to fit in int64")
+		}
+	})
+}
+
+// TestBigIntInDynamicSizing проверяет big.Int в динамических размерах
+func TestBigIntInDynamicSizing(t *testing.T) {
+	t.Run("Big.Int as dynamic size", func(t *testing.T) {
+		// Use big.Int to calculate dynamic size
+		sizeValue := new(big.Int)
+		sizeValue.SetInt64(5) // 5 bytes
+
+		data := "Hello"
+
+		builder := NewBuilder()
+		AddInteger(builder, sizeValue, WithSize(64)) // Store size as big.Int
+		AddBinary(builder, []byte(data))
+
+		bitstring, err := Build(builder)
+		if err != nil {
+			t.Fatalf("Failed to build dynamic size test: %v", err)
+		}
+
+		matcher := NewMatcher()
+		var extractedSize int64
+		var payload []byte
+
+		Integer(matcher, &extractedSize, WithSize(64))
+		RegisterVariable(matcher, "size", &extractedSize)
+		Binary(matcher, &payload, WithDynamicSizeExpression("size*8"), WithUnit(1))
+
+		results, err := Match(matcher, bitstring)
+		if err != nil {
+			t.Fatalf("Failed to match dynamic size pattern: %v", err)
+		}
+
+		if len(results) == 0 {
+			t.Fatalf("Expected non-empty results")
+		}
+
+		extractedSizeBigInt := big.NewInt(extractedSize)
+		if extractedSizeBigInt.Cmp(sizeValue) != 0 {
+			t.Errorf("Expected size %s, got %s", sizeValue.String(), extractedSizeBigInt.String())
+		}
+
+		if string(payload) != data {
+			t.Errorf("Expected payload %s, got %s", data, string(payload))
+		}
+	})
+}
+
+// BenchmarkBigIntOperations измеряет производительность операций с big.Int
+func BenchmarkBigIntOperations(b *testing.B) {
+	hugeInt := new(big.Int)
+	hugeInt.SetInt64(9223372036854775806) // Fits in 64 bits
+
+	b.Run("Big.Int construction", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			builder := NewBuilder()
+			AddInteger(builder, hugeInt, WithSize(64))
+			Build(builder)
+		}
+	})
+
+	b.Run("Big.Int matching", func(b *testing.B) {
+		// Pre-build bitstring
+		builder := NewBuilder()
+		AddInteger(builder, hugeInt, WithSize(64))
+		bitstring, _ := Build(builder)
+
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			matcher := NewMatcher()
+			var extracted int64
+			Integer(matcher, &extracted, WithSize(64))
+			Match(matcher, bitstring)
+		}
+	})
+
+	b.Run("Mixed big.Int and regular int", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			builder := NewBuilder()
+			AddInteger(builder, 42, WithSize(8))
+			AddInteger(builder, hugeInt, WithSize(64))
+			AddInteger(builder, i, WithSize(32))
+			Build(builder)
 		}
 	})
 }

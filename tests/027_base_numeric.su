@@ -1,0 +1,108 @@
+// Integer operations
+int_a = 10
+int_b = 5
+int_sum = int_a + int_b
+int_diff = int_a - int_b
+int_mult = int_a * int_b
+int_div = int_a / int_b
+lua.print("Integer operations:")
+lua.print("sum:", int_sum)
+lua.print("diff:", int_diff)
+lua.print("mult:", int_mult)
+lua.print("div:", int_div)
+
+// Float operations
+float_a = 10.5
+float_b = 2.5
+float_sum = float_a + float_b
+float_diff = float_a - float_b
+float_mult = float_a * float_b
+float_div = float_a / float_b
+lua.print("Float operations:")
+lua.print("float_sum:", float_sum)
+lua.print("float_diff:", float_diff)
+lua.print("float_mult:", float_mult)
+lua.print("float_div:", float_div)
+
+// Negative numbers
+neg_a = -10
+neg_b = -5
+neg_sum = neg_a + neg_b
+neg_diff = neg_a - neg_b
+neg_mult = neg_a * neg_b
+lua.print("Negative operations:")
+lua.print("neg_sum:", neg_sum)
+lua.print("neg_diff:", neg_diff)
+lua.print("neg_mult:", neg_mult)
+
+// Mixed operations
+mixed_sum = int_a + float_b
+mixed_diff = float_a - int_b
+mixed_mult = int_a * neg_b
+lua.print("Mixed operations:")
+lua.print("mixed_sum:", mixed_sum)
+lua.print("mixed_diff:", mixed_diff)
+lua.print("mixed_mult:", mixed_mult)
+
+// String concatenation with numbers
+str_num = "result: " ++ int_sum
+lua.print("String concat:", str_num)
+
+// Number to string conversion
+num_str = "value: " ++ float_a
+lua.print("Number to string:", num_str)
+
+// Zero operations
+zero_a = 0
+zero_sum = int_a + zero_a
+zero_mult = int_a * zero_a
+lua.print("Zero operations:")
+lua.print("zero_sum:", zero_sum)
+lua.print("zero_mult:", zero_mult)
+
+// Negative numbers in conditions
+neg_counter = -5
+neg_threshold = -10
+lua.print("Negative conditions:")
+
+// If with negative numbers
+if (neg_counter < 0) {
+    lua.print("neg_counter is negative:", neg_counter)
+}
+
+if (neg_counter > neg_threshold) {
+    lua.print("neg_counter > neg_threshold:", neg_counter)
+}
+
+// While with negative numbers
+while (neg_counter < 0) {
+    lua.print("while loop neg_counter:", neg_counter)
+    neg_counter = neg_counter + 1
+}
+
+lua.print("final neg_counter:", neg_counter)
+
+// If with explicit negative numbers
+if (-1 < 0) {
+    lua.print("-1 < 0 is true")
+}
+
+if (5 > -2) {
+    lua.print("5 > -2 is true")
+}
+
+// While with explicit negative numbers
+int_var = 3
+while (int_var > -3) {
+    int_var = int_var - 1
+    lua.print("while loop explicit neg_counter:", int_var)
+}
+
+result = 5 + 10 * 3 - 20 / 5 % 2 ** 2
+lua.print(result)
+
+binary_value = 0b10100
+lua.print(1 * binary_value)
+
+scientific = 1.23e-4
+lua.print(scientific * 10)

@@ -2,7 +2,6 @@ package handler
 
 import (
 	"fmt"
-	"strconv"
 
 	"go-parser/pkg/ast"
 	"go-parser/pkg/common"
@@ -35,29 +34,40 @@ func NewQualifiedVariableHandlerWithRegistry(config config.ConstructHandlerConfi
 
 // CanHandle проверяет, может ли обработчик обработать токен
 func (h *QualifiedVariableHandler) CanHandle(token lexer.Token) bool {
-	return token.IsLanguageIdentifierOrCallToken()
+	// Для qualified variables нужен identifier, за которым следует точка
+	if token.Type != lexer.TokenIdentifier && !token.IsLanguageToken() {
+		return false
+	}
+	// Проверяем, есть ли следующий токен и является ли он точкой
+	// Но CanHandle не имеет доступа к tokenStream, так что проверяем только тип токена
+	// Реальную проверку делаем в Handle
+	return true
 }
 
 // Handle обрабатывает квалифицированную переменную
 func (h *QualifiedVariableHandler) Handle(ctx *common.ParseContext) (interface{}, error) {
 	tokenStream := ctx.TokenStream
 
-	// 1. Читаем первый идентификатор (возможный язык)
+	// 1. Проверяем, есть ли следующий токен и является ли он точкой
+	if !tokenStream.HasMore() || tokenStream.Peek().Type != lexer.TokenDot {
+		// Это не qualified variable (нет точки), позволяем другим handlers попробовать
+		return nil, nil
+	}
+
+	// 2. Читаем первый идентификатор (возможный язык)
 	languageToken := tokenStream.Current()
 	language := languageToken.Value
 
-	// 2. Проверяем всю структуру перед потреблением токенов
+	// 3. Проверяем, что язык поддерживается
+	resolvedLanguage, err := h.languageRegistry.ResolveAlias(language)
+	if err != nil {
+		// Если язык не поддерживается, возвращаем ожидаемую ошибку
+		return nil, newErrorWithTokenPos(languageToken, "not a qualified variable")
+	}
+
+	// 4. Проверяем всю структуру перед потреблением токенов
 	// Клонируем поток для предварительной проверки
 	tempStream := tokenStream.Clone()
-
-	// 3. Проверяем, что есть DOT после языка
-	if !tempStream.HasMore() {
-		return nil, fmt.Errorf("not a qualified variable")
-	}
-	nextToken := tempStream.Peek()
-	if nextToken.Type != lexer.TokenDot {
-		return nil, fmt.Errorf("not a qualified variable")
-	}
 
 	// 4. Читаем путь: language.part1.part2. ... .variable
 	// Пропускаем первый DOT
@@ -93,7 +103,7 @@ func (h *QualifiedVariableHandler) Handle(ctx *common.ParseContext) (interface{}
 	}
 
 	// 6. Определяем тип операции по следующему токену
-	var operationType string // "assignment" или "read"
+	var operationType string // "assignment", "indexed_access", или "read"
 
 	if !tempStream.HasMore() {
 		// Если после пути ничего нет - это чтение переменной
@@ -103,13 +113,14 @@ func (h *QualifiedVariableHandler) Handle(ctx *common.ParseContext) (interface{}
 
 		// Если следующий токен - открывающая скобка, это вызов функции, а не квалифицированная переменная
 		if nextToken.Type == lexer.TokenLeftParen {
-			return nil, fmt.Errorf("not a qualified variable")
+			// Это не квалифицированная переменная, а вызов функции - позволяем другим обработчикам попробовать
+			return nil, nil
 		}
 
 		// Если следующий токен - левая квадратная скобка, это индексированный доступ
 		if nextToken.Type == lexer.TokenLBracket {
 			operationType = "indexed_access"
-		} else if nextToken.Type == lexer.TokenAssign {
+		} else if nextToken.Type == lexer.TokenAssign || nextToken.Type == lexer.TokenColonEquals {
 			// Если следующий токен - присваивание, это присваивание
 			operationType = "assignment"
 		} else {
@@ -122,7 +133,7 @@ func (h *QualifiedVariableHandler) Handle(ctx *common.ParseContext) (interface{}
 	tokenStream.Consume() // Consuming language token
 
 	// Проверяем и разрешаем алиас языка через Language Registry
-	resolvedLanguage, err := h.languageRegistry.ResolveAlias(language)
+	// (уже проверено выше, но оставляем для consistency)
 	if err != nil {
 		return nil, fmt.Errorf("unsupported language '%s' in qualified variable: %v", language, err)
 	}
@@ -186,7 +197,7 @@ func (h *QualifiedVariableHandler) Handle(ctx *common.ParseContext) (interface{}
 		}
 
 		// Проверяем, есть ли оператор присваивания после индексированного выражения
-		if tokenStream.HasMore() && tokenStream.Current().Type == lexer.TokenAssign {
+		if tokenStream.HasMore() && (tokenStream.Current().Type == lexer.TokenAssign || tokenStream.Current().Type == lexer.TokenColonEquals) {
 			// Это присваивание: object["key"] = value
 
 			// Потребляем знак присваивания
@@ -514,19 +525,11 @@ func (h *QualifiedVariableHandler) parseSimpleValue(tokenStream stream.TokenStre
 		}, nil
 	case lexer.TokenNumber:
 		// Преобразуем строку в число
-		var num float64
-		_, err := fmt.Sscanf(token.Value, "%f", &num)
+		value, err := parseNumber(token.Value)
 		if err != nil {
 			return nil, fmt.Errorf("invalid number format: %s", token.Value)
 		}
-		return &ast.NumberLiteral{
-			Value: num,
-			Pos: ast.Position{
-				Line:   token.Line,
-				Column: token.Column,
-				Offset: token.Position,
-			},
-		}, nil
+		return createNumberLiteral(token, value), nil
 	case lexer.TokenIdentifier:
 		return ast.NewIdentifier(token, token.Value), nil
 	case lexer.TokenLBrace:
@@ -842,18 +845,11 @@ func (h *QualifiedVariableHandler) parseIndexExpressionForQualified(tokenStream 
 	case lexer.TokenNumber:
 		tokenStream.Consume()
 		// Создаем числовой литерал - конвертируем строку в число
-		numValue, err := strconv.ParseFloat(indexToken.Value, 64)
+		value, err := parseNumber(indexToken.Value)
 		if err != nil {
 			return nil, fmt.Errorf("invalid number literal: %s", indexToken.Value)
 		}
-		indexExpr = &ast.NumberLiteral{
-			Value: numValue,
-			Pos: ast.Position{
-				Line:   indexToken.Line,
-				Column: indexToken.Column,
-				Offset: indexToken.Position,
-			},
-		}
+		indexExpr = createNumberLiteral(indexToken, value)
 	case lexer.TokenIdentifier:
 		tokenStream.Consume()
 		indexExpr = ast.NewIdentifier(indexToken, indexToken.Value)
@@ -900,18 +896,11 @@ func (h *QualifiedVariableHandler) parseIndexExpressionForQualified(tokenStream 
 			}
 		case lexer.TokenNumber:
 			tokenStream.Consume()
-			numValue, err := strconv.ParseFloat(nestedIndexToken.Value, 64)
+			value, err := parseNumber(nestedIndexToken.Value)
 			if err != nil {
 				return nil, fmt.Errorf("invalid number literal: %s", nestedIndexToken.Value)
 			}
-			nestedIndexExpr = &ast.NumberLiteral{
-				Value: numValue,
-				Pos: ast.Position{
-					Line:   nestedIndexToken.Line,
-					Column: nestedIndexToken.Column,
-					Offset: nestedIndexToken.Position,
-				},
-			}
+			nestedIndexExpr = createNumberLiteral(nestedIndexToken, value)
 		case lexer.TokenIdentifier:
 			tokenStream.Consume()
 			nestedIndexExpr = ast.NewIdentifier(nestedIndexToken, nestedIndexToken.Value)
@@ -935,8 +924,42 @@ func (h *QualifiedVariableHandler) parseIndexExpressionForQualified(tokenStream 
 		}
 	}
 
-	// Возвращаем финальный IndexExpression (возможно вложенный)
-	return ast.NewIndexExpression(currentObject, currentIndexExpr, currentPos), nil
+	// Создаем финальный IndexExpression (возможно вложенный)
+	finalIndexExpr := ast.NewIndexExpression(currentObject, currentIndexExpr, currentPos)
+
+	// Проверяем, есть ли доступ к свойству после индексного выражения (например, py.data.users[0].age)
+	for tokenStream.HasMore() && tokenStream.Current().Type == lexer.TokenDot {
+		// Потребляем DOT
+		dotToken := tokenStream.Consume()
+
+		// Проверяем, есть ли идентификатор после DOT
+		if !tokenStream.HasMore() || tokenStream.Current().Type != lexer.TokenIdentifier {
+			return nil, fmt.Errorf("expected identifier after DOT for property access")
+		}
+
+		// Потребляем идентификатор свойства
+		propertyToken := tokenStream.Consume()
+
+		// Создаем PropertyExpression для доступа к свойству
+		// В текущем AST у нас нет专门的 PropertyExpression, поэтому используем IndexExpression с строковым индексом
+		propertyIndex := &ast.StringLiteral{
+			Value: propertyToken.Value,
+			Pos: ast.Position{
+				Line:   propertyToken.Line,
+				Column: propertyToken.Column,
+				Offset: propertyToken.Position,
+			},
+		}
+
+		// Создаем новый IndexExpression, где объект - это предыдущий индексированный доступ
+		finalIndexExpr = ast.NewIndexExpression(finalIndexExpr, propertyIndex, ast.Position{
+			Line:   dotToken.Line,
+			Column: dotToken.Column,
+			Offset: dotToken.Position,
+		})
+	}
+
+	return finalIndexExpr, nil
 }
 
 // parseIndexExpression парсит индексированный доступ (object["key"] или object["key"] = value)
@@ -965,18 +988,11 @@ func (h *QualifiedVariableHandler) parseIndexExpression(tokenStream stream.Token
 	case lexer.TokenNumber:
 		tokenStream.Consume()
 		// Создаем числовой литерал - конвертируем строку в число
-		numValue, err := strconv.ParseFloat(indexToken.Value, 64)
+		value, err := parseNumber(indexToken.Value)
 		if err != nil {
 			return nil, fmt.Errorf("invalid number literal: %s", indexToken.Value)
 		}
-		indexExpr = &ast.NumberLiteral{
-			Value: numValue,
-			Pos: ast.Position{
-				Line:   indexToken.Line,
-				Column: indexToken.Column,
-				Offset: indexToken.Position,
-			},
-		}
+		indexExpr = createNumberLiteral(indexToken, value)
 	case lexer.TokenIdentifier:
 		tokenStream.Consume()
 		indexExpr = ast.NewIdentifier(indexToken, indexToken.Value)
@@ -991,7 +1007,7 @@ func (h *QualifiedVariableHandler) parseIndexExpression(tokenStream stream.Token
 	tokenStream.Consume()
 
 	// Проверяем, есть ли присваивание после индекса
-	if tokenStream.HasMore() && tokenStream.Current().Type == lexer.TokenAssign {
+	if tokenStream.HasMore() && (tokenStream.Current().Type == lexer.TokenAssign || tokenStream.Current().Type == lexer.TokenColonEquals) {
 		// Это присваивание: object["key"] = value
 
 		// Потребляем знак присваивания

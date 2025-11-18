@@ -243,16 +243,11 @@ func (h *LanguageCallStatementHandler) parseSingleExpression(ctx *common.ParseCo
 	case lexer.TokenNumber:
 		// Числовой литерал
 		numToken := tokenStream.Consume()
-		numValue := 0.0
-		fmt.Sscanf(numToken.Value, "%f", &numValue)
-		return &ast.NumberLiteral{
-			Value: numValue,
-			Pos: ast.Position{
-				Line:   numToken.Line,
-				Column: numToken.Column,
-				Offset: numToken.Position,
-			},
-		}, nil
+		numValue, err := parseNumber(numToken.Value)
+		if err != nil {
+			return nil, fmt.Errorf("invalid number format: %s", numToken.Value)
+		}
+		return createNumberLiteral(numToken, numValue), nil
 
 	case lexer.TokenLeftParen:
 		// Сгруппированное выражение в скобках

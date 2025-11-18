@@ -1,0 +1,8 @@
+count = 3
+data = <<1:8,2:8,3:8,4:8,5:8,6:8>>
+match data {
+    <<result:(count*2/1)/binary>> -> {
+        lua.print("Arithmetic result:", lua.string.format("0x%04X", result))
+    },
+    _ -> lua.print("No match")
+}

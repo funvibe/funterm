@@ -69,7 +69,7 @@ func (n *ForInLoopStatement) IsLoop() bool {
 	return true
 }
 
-// NumericForLoopStatement представляет Lua-style числовой цикл: for i=1,5 do lua.print(i) end
+// NumericForLoopStatement представляет Lua-style числовой цикл: for i=1,5 { lua.print(i) }
 type NumericForLoopStatement struct {
 	BaseNode
 	Variable *Identifier // переменная цикла
@@ -139,23 +139,102 @@ func (n *NumericForLoopStatement) IsLoop() bool {
 	return true
 }
 
+// CStyleForLoopStatement представляет C-style for цикл: for (init; condition; increment) { ... }
+type CStyleForLoopStatement struct {
+	BaseNode
+	Initializer Statement   // инициализация (может быть nil)
+	Condition   Expression  // условие (может быть nil)
+	Increment   Expression  // инкремент (может быть nil)
+	Body        []Statement // тело цикла
+	ForToken    lexer.Token // токен 'for'
+	LParenToken lexer.Token // токен '('
+	RParenToken lexer.Token // токен ')'
+	LBraceToken lexer.Token // токен '{'
+	RBraceToken lexer.Token // токен '}'
+	Pos         Position    // позиция начала цикла
+}
+
+// NewCStyleForLoopStatement создает новый узел C-style for цикла
+func NewCStyleForLoopStatement(forToken, lParenToken, rParenToken, lBraceToken, rBraceToken lexer.Token, initializer Statement, condition Expression, increment Expression, body []Statement) *CStyleForLoopStatement {
+	return &CStyleForLoopStatement{
+		ForToken:    forToken,
+		LParenToken: lParenToken,
+		RParenToken: rParenToken,
+		LBraceToken: lBraceToken,
+		RBraceToken: rBraceToken,
+		Initializer: initializer,
+		Condition:   condition,
+		Increment:   increment,
+		Body:        body,
+		Pos:         tokenToPosition(forToken),
+	}
+}
+
+// Type возвращает тип узла
+func (n *CStyleForLoopStatement) Type() NodeType {
+	return NodeCStyleForLoop
+}
+
+// statementMarker реализует интерфейс Statement
+func (n *CStyleForLoopStatement) statementMarker() {}
+
+// Position возвращает позицию узла
+func (n *CStyleForLoopStatement) Position() Position {
+	return n.Pos
+}
+
+// ToMap преобразует узел в map для сериализации
+func (n *CStyleForLoopStatement) ToMap() map[string]interface{} {
+	body := make([]interface{}, len(n.Body))
+	for i, stmt := range n.Body {
+		body[i] = stmt.ToMap()
+	}
+
+	result := map[string]interface{}{
+		"type":     "c_style_for_loop",
+		"body":     body,
+		"position": n.Pos.ToMap(),
+	}
+
+	if n.Initializer != nil {
+		result["initializer"] = n.Initializer.ToMap()
+	}
+
+	if n.Condition != nil {
+		result["condition"] = n.Condition.ToMap()
+	}
+
+	if n.Increment != nil {
+		result["increment"] = n.Increment.ToMap()
+	}
+
+	return result
+}
+
+// IsLoop реализует интерфейс LoopStatement
+func (n *CStyleForLoopStatement) IsLoop() bool {
+	return true
+}
+
 // WhileStatement представляет цикл 'while <condition> { ... }'
 type WhileStatement struct {
 	BaseNode
 	Condition   Expression      // Условие цикла
 	Body        *BlockStatement // Тело цикла (список стейтментов)
 	WhileToken  lexer.Token     // токен 'while'
+	LParenToken lexer.Token     // токен '('
+	RParenToken lexer.Token     // токен ')'
 	LBraceToken lexer.Token     // токен '{'
 	RBraceToken lexer.Token     // токен '}'
 	Pos         Position        // позиция начала цикла
 }
 
 // NewWhileStatement создает новый узел while цикла
-func NewWhileStatement(whileToken, lBraceToken, rBraceToken lexer.Token, condition Expression, body *BlockStatement) *WhileStatement {
+func NewWhileStatement(whileToken, lParenToken, rParenToken lexer.Token, condition Expression, body *BlockStatement) *WhileStatement {
 	return &WhileStatement{
 		WhileToken:  whileToken,
-		LBraceToken: lBraceToken,
-		RBraceToken: rBraceToken,
+		LParenToken: lParenToken,
+		RParenToken: rParenToken,
 		Condition:   condition,
 		Body:        body,
 		Pos:         tokenToPosition(whileToken),

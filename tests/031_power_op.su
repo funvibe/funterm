@@ -1,0 +1,41 @@
+// Test power operator (**)
+
+// Basic integer exponentiation
+result1 = 2 ** 3
+js.print("2 ** 3 =", result1)
+
+// Float exponentiation
+result2 = 2.5 ** 2
+js.print("2.5 ** 2 =", result2)
+
+// Negative exponent
+result3 = 4 ** -1
+js.print("4 ** -1 =", result3)
+
+// Zero exponent
+result4 = 5 ** 0
+js.print("5 ** 0 =", result4)
+
+// Power of 1
+result5 = 7 ** 1
+js.print("7 ** 1 =", result5)
+
+// Operator precedence: exponentiation before multiplication
+result6 = 2 * 3 ** 2
+js.print("2 * 3 ** 2 =", result6)
+
+// Right-associative: 2 ** (3 ** 2)
+result7 = 2 ** 3 ** 2
+js.print("2 ** 3 ** 2 =", result7)
+
+// With parentheses
+result8 = (2 ** 3) ** 2
+js.print("(2 ** 3) ** 2 =", result8)
+
+// Large exponent
+result9 = 2 ** 10
+js.print("2 ** 10 =", result9)
+
+// Fractional base
+result10 = 0.5 ** 3
+js.print("0.5 ** 3 =", result10)

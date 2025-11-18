@@ -4,7 +4,7 @@ lua.values = [0x12, 0x34, 0x56, 0x78]
 lua.result = <<>>
 
 # Построение с разными endianness
-for i = 0, 3 do
+for i = 0, 4 {
     value = lua.values[i]
     if (i % 2 == 0) {
         # Четные индексы - big-endian
@@ -13,7 +13,7 @@ for i = 0, 3 do
         # Нечетные индексы - little-endian
         lua.result = <<lua.result/binary, value:2/little-unsigned-integer-unit:8>>
     }
-end
+}
 
 lua.print("Dynamic result:", lua.result)
 lua.print("Dynamic result size:", @lua.result, "bytes")

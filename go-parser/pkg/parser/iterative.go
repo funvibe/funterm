@@ -52,7 +52,6 @@ func (p *CleanIterativeParser) ParseTokens(stream stream.TokenStream) (*ParseRes
 			for _, constructType := range []common.ConstructType{
 				common.ConstructLiteral,
 				common.ConstructVariable,
-				common.ConstructTuple,
 				common.ConstructFunction,
 				common.ConstructGroup,
 			} {
