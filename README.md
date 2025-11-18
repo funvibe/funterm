@@ -26,7 +26,7 @@ cd funterm
 go build -o funterm main.go config.go batch.go
 
 or download app for your OS:
-https://github.com/funvibe/funterm/releases/latest
+[Funterm latest](https://github.com/funvibe/funterm/releases/latest)
 
 then run it:
 ./funterm
