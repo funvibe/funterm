@@ -18,12 +18,17 @@ A REPL and scripting environment with advanced bitstring operations inspired by 
 - [Use Cases](#use-cases)
 - [Examples & Resources](#examples--resources)
 
-## Installation
+## Installation and Downloads
 
 ```bash
 git clone https://github.com/funvibe/funterm
 cd funterm
 go build -o funterm main.go config.go batch.go
+
+or download app for your OS:
+https://github.com/funvibe/funterm/releases/latest
+
+then run it:
 ./funterm
 ```
 
@@ -529,7 +534,7 @@ formatted = lua.format_hex(status)
 ### Run Examples
 
 ```bash
-# Run specific example
+# Run script
 ./funterm examples/001_dns_query.su
 
 # Interactive REPL
