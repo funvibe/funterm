@@ -24,11 +24,13 @@ A REPL and scripting environment with advanced bitstring operations inspired by 
 git clone https://github.com/funvibe/funterm
 cd funterm
 go build -o funterm main.go config.go batch.go
+```
 
 or download app for your OS:
 [Funterm latest](https://github.com/funvibe/funterm/releases/latest)
 
 then run it:
+```bash
 ./funterm
 ```
 
